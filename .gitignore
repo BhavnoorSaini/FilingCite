@@ -31,3 +31,7 @@ coverage/
 
 # npm lockfile (this project uses pnpm)
 package-lock.json
+
+# ingestion cache (Docling output) and Hugging Face download metadata
+data/
+backend/models/**/.cache/

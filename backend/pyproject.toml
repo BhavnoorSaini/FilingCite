@@ -4,7 +4,16 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.124.2",
+  "fastembed>=0.9.1",
   "pgvector>=0.5.1",
   "psycopg[binary]>=3.3.6",
   "uvicorn>=0.38.0",
 ]
+
+[dependency-groups]
+ingest = [
+    "docling>=2.145.0",
+]
+
+[tool.ruff]
+line-length = 100

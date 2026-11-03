@@ -1,6 +1,5 @@
 from fastapi import FastAPI
 
-
 app = FastAPI(
     title="FilingCite API",
     docs_url="/svc/api/docs",
