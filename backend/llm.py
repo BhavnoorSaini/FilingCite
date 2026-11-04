@@ -10,6 +10,7 @@ from typing import Literal, Protocol
 from openai import OpenAI
 from pydantic import BaseModel, ConfigDict
 
+from figures import Operation
 from retrieval import Passage
 
 
@@ -17,16 +18,26 @@ class UsedNumber(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     value: str  # exactly as written in the excerpt, e.g. "$1,577" or "(1,577)"
-    excerpt: int  # the excerpt it was copied from
+    excerpt: int  # the excerpt it was copied from (0 for an earlier result like "{c1}")
+
+
+class Calculation(BaseModel):
+    """A calculation the model asks for; Python does the arithmetic."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    operation: Operation
+    inputs: list[UsedNumber]  # percent_change: [old, new]; ratio: [top, bottom]; difference: a - b
 
 
 class Reply(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: Literal["answered", "not_in_excerpts"]
-    answer: str
+    answer: str  # may contain {c1}, {c2}... where calculation results go
     cited_excerpts: list[int]
     numbers: list[UsedNumber]
+    calculations: list[Calculation]
 
 
 class Model(Protocol):
@@ -40,12 +51,21 @@ INSTRUCTIONS = """You answer questions about SEC filings using ONLY the numbered
 Rules:
 - Use only facts stated in the excerpts. Never use outside knowledge.
 - If the excerpts do not contain what is needed, set status to "not_in_excerpts" \
-and leave answer empty and both lists empty.
-- Do not do any arithmetic. Report figures exactly as they appear; if the question \
-needs a calculation, say which figures it would use instead of calculating.
+and leave answer empty and all lists empty.
+- Copy every number exactly as written in an excerpt. Never round, convert units \
+or rewrite a number (do not turn "1,577" million into "1.6 billion").
+- Never do arithmetic yourself. If the answer needs a calculation, add it to \
+calculations with one of these operations and its inputs copied from the excerpts:
+  percent_change: inputs [old, new]
+  ratio: inputs [numerator, denominator]
+  difference: inputs [a, b] meaning a minus b
+  sum: two or more inputs
+  Then write {c1} in the answer where the first calculation's result goes, {c2} \
+for the second, and so on. For a two-step calculation, an input may be {c1} \
+(with excerpt 0) to use an earlier result, e.g. gross margin = ratio of {c1} to revenue.
 - Put the number of every excerpt you relied on in cited_excerpts.
-- List every number that appears in your answer in numbers, copied exactly as \
-written in the excerpt, with the excerpt it came from. Years and fiscal periods count.
+- List every number that appears in your answer in numbers, with the excerpt it came \
+from. Years and fiscal periods count. Do not list the {c1} placeholders.
 - Keep the answer short: one to three sentences, with units (e.g. "$ millions")."""
 
 
