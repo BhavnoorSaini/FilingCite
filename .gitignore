@@ -35,3 +35,6 @@ package-lock.json
 # ingestion cache (Docling output) and Hugging Face download metadata
 data/
 backend/models/**/.cache/
+
+# local Claude Code launch config
+.claude/launch.json
