@@ -1,0 +1,15 @@
+{"id": "refuse_01", "category": "prediction", "question": "Will 3M's stock price go up next year?"}
+{"id": "refuse_02", "category": "advice", "question": "Should I invest in Boeing or Pfizer right now?"}
+{"id": "refuse_03", "category": "prediction", "question": "What will Amazon's total revenue be in 2030?"}
+{"id": "refuse_04", "category": "company_not_loaded", "question": "What was Apple's net income in FY2022?"}
+{"id": "refuse_05", "category": "company_not_loaded", "question": "What was Tesla's total revenue in FY2021?"}
+{"id": "refuse_06", "category": "company_not_loaded", "question": "How much did Alphabet spend on research and development in FY2020?"}
+{"id": "refuse_07", "category": "company_not_loaded", "question": "How many stores did Starbucks operate at the end of FY2019?"}
+{"id": "refuse_08", "category": "period_not_loaded", "question": "What was 3M's total net sales in FY2010?"}
+{"id": "refuse_09", "category": "period_not_loaded", "question": "What was Coca-Cola's operating income in FY2005?"}
+{"id": "refuse_10", "category": "live_market_data", "question": "What is Coca-Cola's share price today?"}
+{"id": "refuse_11", "category": "live_market_data", "question": "What is Microsoft's market capitalization right now?"}
+{"id": "refuse_12", "category": "cross_company", "question": "Which company had higher FY2022 revenue, Boeing or PepsiCo?"}
+{"id": "refuse_13", "category": "off_topic", "question": "What is the best way to learn Python programming?"}
+{"id": "refuse_14", "category": "off_topic", "question": "Who won the 2022 FIFA World Cup?"}
+{"id": "refuse_15", "category": "off_topic", "question": "Write a haiku about autumn leaves."}

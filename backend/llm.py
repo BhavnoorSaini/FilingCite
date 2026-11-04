@@ -53,7 +53,10 @@ Rules:
 - If the excerpts do not contain what is needed, set status to "not_in_excerpts" \
 and leave answer empty and all lists empty.
 - Copy every number exactly as written in an excerpt. Never round, convert units \
-or rewrite a number (do not turn "1,577" million into "1.6 billion").
+or rewrite a number (do not turn "1,577" million into "1.6 billion"). If the question \
+asks for one unit but the excerpt uses another, give the figure as written with the \
+excerpt's unit (e.g. "$381,603 thousand"); never divide by 1,000 to convert it.
+- Write years in full (2022, not FY22).
 - Never do arithmetic yourself. If the answer needs a calculation, add it to \
 calculations with one of these operations and its inputs copied from the excerpts:
   percent_change: inputs [old, new]
@@ -77,24 +80,29 @@ def build_prompt(question: str, passages: list[Passage]) -> str:
     return f"{INSTRUCTIONS}\n\nExcerpts:\n\n{excerpts}\n\nQuestion: {question}"
 
 
-def groq_model() -> Model:
-    client = OpenAI(base_url=os.environ["GROQ_BASE_URL"], api_key=os.environ["GROQ_API_KEY"])
-    schema = {
-        "type": "json_schema",
-        "json_schema": {"name": "reply", "strict": True, "schema": Reply.model_json_schema()},
-    }
+class GroqModel:
+    """Calls Groq with a strict reply schema. last_tokens records each call's usage for the eval."""
 
-    def call(prompt: str) -> str:
-        response = client.chat.completions.create(
+    def __init__(self) -> None:
+        self.client = OpenAI(
+            base_url=os.environ["GROQ_BASE_URL"], api_key=os.environ["GROQ_API_KEY"]
+        )
+        self.schema = {
+            "type": "json_schema",
+            "json_schema": {"name": "reply", "strict": True, "schema": Reply.model_json_schema()},
+        }
+        self.last_tokens = 0
+
+    def __call__(self, prompt: str) -> str:
+        response = self.client.chat.completions.create(
             model=os.environ["GROQ_MODEL"],
             # Groq recommends putting all instructions in the user message for reasoning models.
             messages=[{"role": "user", "content": prompt}],
-            response_format=schema,
+            response_format=self.schema,
             reasoning_effort=os.environ["GROQ_REASONING_EFFORT"],
             max_completion_tokens=int(os.environ["GROQ_MAX_COMPLETION_TOKENS"]),
             temperature=0,
             extra_body={"include_reasoning": False},
         )
+        self.last_tokens = response.usage.total_tokens if response.usage else 0
         return response.choices[0].message.content or ""
-
-    return call

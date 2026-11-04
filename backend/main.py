@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from answer import AskResponse, answer_question
 from db import connect
-from llm import Model, groq_model
+from llm import GroqModel, Model
 
 app = FastAPI(
     title="FilingCite API",
@@ -24,7 +24,7 @@ class AskRequest(BaseModel):
 
 @cache
 def get_model() -> Model:
-    return groq_model()  # tests override this dependency with a fake model
+    return GroqModel()  # tests override this dependency with a fake model
 
 
 @app.get("/svc/api/status")

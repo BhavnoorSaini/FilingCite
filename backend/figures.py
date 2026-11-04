@@ -11,16 +11,17 @@ from typing import Literal
 
 Operation = Literal["percent_change", "ratio", "difference", "sum"]
 
-# "10-K" and friends are document names, not numbers.
-FILING_NAMES = re.compile(r"\b(?:10-K|10-Q|8-K)\b", re.IGNORECASE)
+# Labels, not figures: document names ("10-K") and quarters or halves ("Q2", "2Q", "H1").
+LABELS = re.compile(r"\b(?:10-K|10-Q|8-K|Q[1-4]|[1-4]Q|H[12])\b", re.IGNORECASE)
+# "FY22" and "2Q23" / "Q2'23" mean 2022 and 2023, so they are checked as those years.
+SHORT_FISCAL_YEAR = re.compile(r"\b(?:FY|Q[1-4]|[1-4]Q)\s?'?(\d{2})\b", re.IGNORECASE)
 NUMBER = re.compile(r"\d+(?:,\d{3})*(?:\.\d+)?")
 
 
 def values_in(text: str) -> set[Decimal]:
     """Every number written in the text, as an absolute value."""
-    return {
-        Decimal(m.replace(",", "")).normalize() for m in NUMBER.findall(FILING_NAMES.sub(" ", text))
-    }
+    text = LABELS.sub(" ", SHORT_FISCAL_YEAR.sub(r" 20\1", text))
+    return {Decimal(m.replace(",", "")).normalize() for m in NUMBER.findall(text)}
 
 
 def parse(value: str) -> Decimal | None:

@@ -89,11 +89,12 @@ def check_reply(raw: str, passages: list[Passage]) -> Reply | RefusalReason:
 
 
 def check_numbers(
-    reply: Reply, passages: list[Passage]
+    reply: Reply, passages: list[Passage], verify: bool = True
 ) -> tuple[str, list[CalculationResult]] | RefusalReason:
     """Every number must be on a cited page, or be computed here from numbers that are.
 
-    Returns the answer with calculation results filled in.
+    Returns the answer with calculation results filled in. verify=False skips the
+    traceability checks (still doing the arithmetic) so the eval can compare off vs on.
     """
     # The excerpt label (company, fiscal year) counts as part of the page, so "3M" and "2018" pass.
     on_page = {
@@ -104,6 +105,8 @@ def check_numbers(
 
     def traceable(value: str, excerpt: int) -> bool:
         number = parse(value)
+        if not verify:
+            return number is not None
         return number is not None and abs(number).normalize() in on_page[excerpt]
 
     if not all(traceable(n.value, n.excerpt) for n in reply.numbers):
@@ -141,7 +144,7 @@ def check_numbers(
 
     # Numbers written in the answer itself, ignoring the {c1} placeholders.
     cited_values = set().union(*(on_page[i] for i in cited))
-    if not values_in(PLACEHOLDER.sub(" ", reply.answer)) <= cited_values:
+    if verify and not values_in(PLACEHOLDER.sub(" ", reply.answer)) <= cited_values:
         return "unverified_number"
     if any(not 1 <= int(i) <= len(shown) for i in PLACEHOLDER.findall(reply.answer)):
         return "malformed_reply"
@@ -149,15 +152,12 @@ def check_numbers(
     return answer, shown
 
 
-def answer_question(conn: psycopg.Connection, question: str, model: Model) -> AskResponse:
-    passages = search(conn, question, int(os.environ["RETRIEVAL_TOP_K"]))
-    if not passages or passages[0].similarity < float(os.environ["MIN_SIMILARITY"]):
-        return refuse("weak_match")
-
-    reply = check_reply(model(build_prompt(question, passages)), passages)
+def respond(raw: str, passages: list[Passage], verify_numbers: bool = True) -> AskResponse:
+    """Turn the model's raw reply into the response the user sees."""
+    reply = check_reply(raw, passages)
     if isinstance(reply, str):
         return refuse(reply)
-    checked = check_numbers(reply, passages)
+    checked = check_numbers(reply, passages, verify_numbers)
     if isinstance(checked, str):
         return refuse(checked)
     answer, calculations = checked
@@ -183,3 +183,10 @@ def answer_question(conn: psycopg.Connection, question: str, model: Model) -> As
         refusal=None,
         message=None,
     )
+
+
+def answer_question(conn: psycopg.Connection, question: str, model: Model) -> AskResponse:
+    passages = search(conn, question, int(os.environ["RETRIEVAL_TOP_K"]))
+    if not passages or passages[0].similarity < float(os.environ["MIN_SIMILARITY"]):
+        return refuse("weak_match")
+    return respond(model(build_prompt(question, passages)), passages)
