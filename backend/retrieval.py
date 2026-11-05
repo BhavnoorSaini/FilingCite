@@ -20,14 +20,12 @@ from figures import SHORT_FISCAL_YEAR
 
 @dataclass
 class Passage:
-    chunk_id: int
     doc_name: str
     company: str
     doc_type: str
     doc_period: int
     doc_link: str | None
     page: int
-    is_table: bool
     content: str
     similarity: float  # cosine similarity between the question and the chunk
 
@@ -193,11 +191,11 @@ def fetch(conn: psycopg.Connection, ids: list[int], vector) -> list[Passage]:
     rows = conn.execute(
         """
         SELECT c.id, f.doc_name, f.company, f.doc_type, f.doc_period, f.doc_link,
-               c.page, c.is_table, c.content, 1 - (c.embedding <=> %(v)s)
+               c.page, c.content, 1 - (c.embedding <=> %(v)s)
         FROM chunks c JOIN filings f ON f.id = c.filing_id
         WHERE c.id = ANY(%(ids)s)
         """,
         {"v": vector, "ids": ids},
     ).fetchall()
-    by_id = {row[0]: Passage(*row) for row in rows}
+    by_id = {row[0]: Passage(*row[1:]) for row in rows}
     return [by_id[i] for i in ids]
