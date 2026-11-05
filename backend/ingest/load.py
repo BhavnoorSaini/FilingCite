@@ -1,18 +1,14 @@
 """Parse, chunk, embed and load FinanceBench filings into Neon. Mac only; never deployed.
 
-Usage (from backend/):
-    uv run --group ingest --env-file ../.env python -m ingest.load              # every filing used by a question
-    uv run --group ingest --env-file ../.env python -m ingest.load 3M_2018_10K  # specific filings
-    add --force to reload filings that are already loaded
+Usage (from backend/):  uv run --group ingest --env-file ../.env python -m ingest.load
 
-Docling's output is cached as JSON, so re-runs skip the slow parse. Re-running is safe: a
-filing's chunks are replaced in one transaction, never duplicated.
+Loads every filing a FinanceBench question uses, skipping filings already loaded, so an
+interrupted run picks up where it stopped. Docling's output is cached as JSON. A filing and
+its chunks are written in one transaction, so re-running never creates duplicates.
 """
 
-import argparse
 import json
 import os
-import time
 from pathlib import Path
 
 from docling.datamodel.base_models import InputFormat
@@ -43,17 +39,11 @@ def save(meta: dict, chunks, embeddings) -> None:
     # A fresh connection per filing: Neon suspends idle computes while a long PDF parses.
     with connect() as conn, conn.transaction():
         filing_id = conn.execute(
-            """
-            INSERT INTO filings (doc_name, company, doc_type, doc_period, doc_link)
-            VALUES (%(doc_name)s, %(company)s, %(doc_type)s, %(doc_period)s, %(doc_link)s)
-            ON CONFLICT (doc_name) DO UPDATE SET company = EXCLUDED.company,
-                doc_type = EXCLUDED.doc_type, doc_period = EXCLUDED.doc_period,
-                doc_link = EXCLUDED.doc_link
-            RETURNING id
-            """,
-            {k: meta.get(k) for k in ("doc_name", "company", "doc_type", "doc_period", "doc_link")},
+            "INSERT INTO filings (doc_name, company, doc_type, doc_period, doc_link)"
+            " VALUES (%(doc_name)s, %(company)s, %(doc_type)s, %(doc_period)s, %(doc_link)s)"
+            " RETURNING id",
+            meta,
         ).fetchone()[0]
-        conn.execute("DELETE FROM chunks WHERE filing_id = %s", (filing_id,))
         conn.cursor().executemany(
             "INSERT INTO chunks (filing_id, page, chunk_index, is_table, content, embedding)"
             " VALUES (%s, %s, %s, %s, %s, %s)",
@@ -65,17 +55,13 @@ def save(meta: dict, chunks, embeddings) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("doc_names", nargs="*", help="default: every filing used by a question")
-    parser.add_argument("--force", action="store_true", help="reload filings already loaded")
-    args = parser.parse_args()
-
     root = BACKEND_DIR / os.environ["FINANCEBENCH_DIR"]  # absolute paths stay as-is
     cache_dir = BACKEND_DIR / os.environ["PARSED_DIR"]
-    info = read_jsonl(root / "data/financebench_document_information.jsonl")
-    metadata = {d["doc_name"]: d for d in info}
+    metadata = {
+        d["doc_name"]: d for d in read_jsonl(root / "data/financebench_document_information.jsonl")
+    }
     questions = read_jsonl(root / "data/financebench_open_source.jsonl")
-    names = args.doc_names or sorted({q["doc_name"] for q in questions})
+    names = sorted({q["doc_name"] for q in questions})
     with connect() as conn:
         loaded = {r[0] for r in conn.execute("SELECT doc_name FROM filings")}
 
@@ -84,13 +70,12 @@ def main() -> None:
         format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)}
     )
     for i, name in enumerate(names, 1):
-        if name in loaded and not args.force:
+        if name in loaded:
             continue
-        start = time.monotonic()
         doc = parse(root / "pdfs" / f"{name}.pdf", cache_dir, converter)
         chunks = chunk_document(doc, int(os.environ["CHUNK_WORDS"]))
         save(metadata[name], chunks, embed_passages([c.content for c in chunks]))
-        print(f"[{i}/{len(names)}] {name}: {len(chunks)} chunks in {time.monotonic() - start:.0f}s")
+        print(f"[{i}/{len(names)}] {name}: {len(chunks)} chunks", flush=True)
 
 
 if __name__ == "__main__":

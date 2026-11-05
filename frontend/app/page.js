@@ -2,109 +2,68 @@
 
 import { useState } from "react";
 
+// Four it answers, and one it should refuse.
 const EXAMPLES = [
-  "What production rate changes is Boeing forecasting for FY2023?",
-  "What is Coca Cola's FY2021 COGS % margin? Calculate what was asked by utilizing the line items clearly shown in the income statement.",
+  "What was 3M's capital expenditure in FY2018?",
+  "What is Coca Cola's FY2021 COGS % margin?",
+  "What was Amazon's revenue growth from FY2016 to FY2017?",
+  "What were Nike's total current assets at the end of FY2019?",
   "Will Tesla stock go up next week?",
 ];
 
-const DOC_TYPES = { "10k": "10-K", "10q": "10-Q", "8k": "8-K", earnings: "Earnings release" };
+const SIGNS = { ratio: "÷", percentage: "÷", difference: "−", sum: "+", product: "×" };
 
-function docType(type) {
-  return DOC_TYPES[type.toLowerCase()] ?? type;
-}
-
-// "{c1}" as a calculation input means the result of calculation 1.
-function input(value) {
-  const step = value.match(/^\{c(\d+)\}$/);
-  return step ? `result ${step[1]}` : value;
-}
-
+// How Python worked out a result; "{c1}" as an input means the result of step 1.
 function describe({ operation, inputs, result }) {
-  const values = inputs.map(input);
-  const [a, b] = values;
-  switch (operation) {
-    case "percent_change":
-      return `Change from ${a} to ${b} = ${result}`;
-    case "ratio":
-      return `${a} ÷ ${b} = ${result}`;
-    case "percentage":
-      return `${a} ÷ ${b} × 100 = ${result}`;
-    case "difference":
-      return `${a} − ${b} = ${result}`;
-    case "average":
-      return `Average of ${values.join(", ")} = ${result}`;
-    case "product":
-      return `${values.join(" × ")} = ${result}`;
-    default:
-      return `${values.join(" + ")} = ${result}`;
-  }
-}
-
-async function ask(question) {
-  try {
-    const response = await fetch("/svc/api/ask", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question }),
-    });
-    if (response.ok) return { kind: "result", ...(await response.json()) };
-    if (response.status === 503) {
-      return { kind: "error", message: "The answer service is busy or unavailable. Try again in a minute." };
-    }
-    return { kind: "error", message: "Something went wrong answering that question." };
-  } catch {
-    return { kind: "error", message: "Couldn't reach FilingCite. Check your connection and try again." };
-  }
+  const values = inputs.map((v) => v.replace(/^\{c(\d+)\}$/, "result $1"));
+  if (operation === "percent_change") return `Change from ${values[0]} to ${values[1]} = ${result}`;
+  if (operation === "average") return `Average of ${values.join(", ")} = ${result}`;
+  const times100 = operation === "percentage" ? " × 100" : "";
+  return `${values.join(` ${SIGNS[operation]} `)}${times100} = ${result}`;
 }
 
 export default function Home() {
   const [question, setQuestion] = useState("");
-  const [asked, setAsked] = useState("");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  async function submit(text) {
-    const trimmed = text.trim();
-    if (!trimmed || loading) return;
-    setQuestion(trimmed);
-    setAsked(trimmed);
+  async function ask(text) {
+    setQuestion(text);
     setLoading(true);
     setResult(null);
-    setResult(await ask(trimmed));
+    try {
+      const response = await fetch("/svc/api/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: text.trim() }),
+      });
+      setResult(response.ok ? await response.json() : { error: true });
+    } catch {
+      setResult({ error: true });
+    }
     setLoading(false);
   }
 
   return (
     <main>
-      <header>
-        <h1>FilingCite</h1>
-        <p className="tagline">
-          Answers about public companies&apos; SEC filings. Every number is traced to a cited
-          page, or FilingCite says it doesn&apos;t know.
-        </p>
-      </header>
+      <h1>FilingCite</h1>
+      <p className="muted">
+        Answers about public companies&apos; SEC filings. Every number is traced to a cited page,
+        or FilingCite says it doesn&apos;t know.
+      </p>
 
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          submit(question);
+          ask(question);
         }}
       >
-        <label htmlFor="question">Your question</label>
-        <textarea
-          id="question"
-          rows={3}
+        <input
+          aria-label="Your question"
           maxLength={500}
           value={question}
           placeholder="e.g. What was 3M's capital expenditure in FY2018?"
           onChange={(event) => setQuestion(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              submit(question);
-            }
-          }}
         />
         <button type="submit" disabled={loading || !question.trim()}>
           {loading ? "Checking the filings…" : "Ask"}
@@ -112,60 +71,37 @@ export default function Home() {
       </form>
 
       <div className="examples">
-        <span>Try:</span>
         {EXAMPLES.map((example) => (
-          <button
-            key={example}
-            type="button"
-            className="example"
-            disabled={loading}
-            onClick={() => submit(example)}
-          >
-            {example.length > 70 ? `${example.slice(0, 67)}…` : example}
+          <button key={example} type="button" disabled={loading} onClick={() => ask(example)}>
+            {example}
           </button>
         ))}
       </div>
 
-      <section aria-live="polite">
-        {result && <Result question={asked} result={result} />}
-      </section>
+      <section aria-live="polite">{result && <Result result={result} />}</section>
 
-      <footer>
-        Covers 84 filings (10-Ks, 10-Qs, 8-Ks and earnings releases) from 32 companies,
-        2015–2024, from the FinanceBench dataset. Not investment advice.
-      </footer>
+      <p className="muted">
+        Covers 84 filings from 32 companies in the FinanceBench dataset. Not investment advice.
+      </p>
     </main>
   );
 }
 
-function Result({ question, result }) {
-  if (result.kind === "error") {
-    return (
-      <article className="card error">
-        <p>{result.message}</p>
-      </article>
-    );
+function Result({ result }) {
+  if (result.error) {
+    return <p className="card">Something went wrong. Try again in a minute.</p>;
   }
-
   if (!result.answered) {
-    return (
-      <article className="card refusal">
-        <p className="asked">{question}</p>
-        <h2>I don&apos;t know</h2>
-        <p>{result.message.replace(/^I don't know\.\s*/, "")}</p>
-      </article>
-    );
+    return <p className="card refusal">{result.message}</p>;
   }
-
   return (
     <article className="card">
-      <p className="asked">{question}</p>
       <p className="answer">{result.answer}</p>
 
       {result.calculations.length > 0 && (
         <>
           <h3>Calculated by FilingCite</h3>
-          <ol className="calculations">
+          <ol>
             {result.calculations.map((calc, i) => (
               <li key={i}>{describe(calc)}</li>
             ))}
@@ -174,20 +110,13 @@ function Result({ question, result }) {
       )}
 
       <h3>Sources</h3>
-      <ol className="citations">
+      <ol>
         {result.citations.map((c) => (
           <li key={c.number}>
-            <span className="number">{c.number}</span>
-            <span>
-              {c.company} · {docType(c.doc_type)} {c.doc_period} ·{" "}
-              {c.doc_link ? (
-                <a href={`${c.doc_link}#page=${c.page}`} target="_blank" rel="noopener noreferrer">
-                  page {c.page}
-                </a>
-              ) : (
-                `page ${c.page}`
-              )}
-            </span>
+            [{c.number}] {c.company} {c.doc_type.toUpperCase()} {c.doc_period},{" "}
+            <a href={`${c.doc_link}#page=${c.page}`} target="_blank" rel="noopener noreferrer">
+              page {c.page}
+            </a>
           </li>
         ))}
       </ol>

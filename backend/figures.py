@@ -26,7 +26,7 @@ DASHES = str.maketrans({c: "-" for c in "\u2010\u2011\u2012\u2013\u2014\u2015\u2
 def values_in(text: str) -> set[Decimal]:
     """Every number written in the text, as an absolute value."""
     text = LABELS.sub(" ", SHORT_FISCAL_YEAR.sub(r" 20\1", text.translate(DASHES)))
-    return {Decimal(m.replace(",", "")).normalize() for m in NUMBER.findall(text)}
+    return {Decimal(m.replace(",", "")) for m in NUMBER.findall(text)}
 
 
 def parse(value: str) -> Decimal | None:
@@ -70,13 +70,14 @@ def calculate(operation: Operation, inputs: list[Decimal]) -> Decimal | None:
     return None
 
 
-def format_result(result: Decimal, percent: bool, whole: bool, decimals: int) -> str:
+def format_result(result: Decimal, percent: bool, decimals: int) -> str:
     """Show a result with `decimals` places, but at least 3 significant digits (0.103, not 0.10).
 
     Whole results (e.g. a sum of whole numbers) have no decimals; percentages end in "%".
     """
+    whole = result == result.to_integral_value()
     places = 0 if whole else decimals
-    while not whole and 0 < abs(result) < Decimal(10) ** (2 - places):
+    while not whole and abs(result) < Decimal(10) ** (2 - places):
         places += 1
     text = f"{result:,.{places}f}"
     return f"{text}%" if percent else text

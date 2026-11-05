@@ -1,40 +1,14 @@
-# dependencies
-node_modules
-
-# next.js
+node_modules/
 .next/
-out/
 next-env.d.ts
-*.tsbuildinfo
-
-# python
 __pycache__/
-*.pyc
 .venv/
-
-# env files
-.env*
-!.env.example
-
-# vercel
-.vercel
-
-# testing / tooling
-coverage/
 .pytest_cache/
 .ruff_cache/
-
-# misc
+.env*
+!.env.example
+.vercel
 .DS_Store
-*.log
-*.pem
-
-# npm lockfile (this project uses pnpm)
-package-lock.json
-
-# ingestion cache (Docling output) and Hugging Face download metadata
+.claude/
+# Docling's parsed output (ingestion cache)
 data/
-backend/models/**/.cache/
-
-# local Claude Code launch config
-.claude/launch.json

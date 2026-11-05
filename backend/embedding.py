@@ -7,17 +7,12 @@ from fastembed import TextEmbedding
 BACKEND_DIR = Path(__file__).resolve().parent
 
 
-def model_dir() -> Path:
-    """Folder holding the bundled model files (relative paths resolve from backend/)."""
-    return BACKEND_DIR / os.environ["EMBEDDING_MODEL_DIR"]
-
-
 @cache
 def _model() -> TextEmbedding:
-    # Load only from the bundled folder; never download at runtime.
+    # Load only from the folder bundled with the backend; never download at runtime.
     return TextEmbedding(
         model_name=os.environ["EMBEDDING_MODEL"],
-        specific_model_path=str(model_dir()),
+        specific_model_path=str(BACKEND_DIR / os.environ["EMBEDDING_MODEL_DIR"]),
         local_files_only=True,
     )
 

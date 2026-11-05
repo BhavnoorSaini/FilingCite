@@ -1,4 +1,4 @@
-"""Create the pgvector extension, tables and indexes. Safe to re-run.
+"""Create the pgvector extension and tables. Safe to re-run.
 
 Usage (from backend/):  uv run --env-file ../.env python -m scripts.init_db
 """

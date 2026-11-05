@@ -605,7 +605,6 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "docling-core" },
-    { name = "httpx" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -626,7 +625,6 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "docling-core", specifier = ">=2.105.0" },
-    { name = "httpx", specifier = ">=0.28.1" },
     { name = "pytest", specifier = ">=9.2.0" },
     { name = "ruff", specifier = ">=0.17.3" },
 ]

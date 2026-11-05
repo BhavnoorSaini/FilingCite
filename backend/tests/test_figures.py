@@ -47,6 +47,6 @@ def test_calculate(operation, inputs, result):
 
 
 def test_format_result():
-    assert format_result(D("0.10283"), percent=False, whole=False, decimals=2) == "0.103"
-    assert format_result(D("10.283"), percent=True, whole=False, decimals=2) == "10.28%"
-    assert format_result(D(25385), percent=False, whole=True, decimals=2) == "25,385"
+    assert format_result(D("0.10283"), percent=False, decimals=2) == "0.103"
+    assert format_result(D("10.283"), percent=True, decimals=2) == "10.28%"
+    assert format_result(D(25385), percent=False, decimals=2) == "25,385"

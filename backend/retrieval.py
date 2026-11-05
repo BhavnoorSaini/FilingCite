@@ -4,7 +4,7 @@
 2. If it names a financial statement, or a line item that lives on one ("inventory" is on
    the balance sheet, "COGS" on the income statement, "capex" on the cash flow statement),
    put that statement's tables first: these big tables rarely rank well.
-3. Add the chunks closest in meaning, each followed by the tables on its page.
+3. Add the chunks closest in meaning.
 4. Keep as many passages as fit the token budget, best first.
 """
 
@@ -144,31 +144,8 @@ def search(conn: psycopg.Connection, question: str, k: int) -> list[Passage]:
             {"filings": filings, "statements": statements, "v": vector, "k": k},
         )
     ]
-    ordered = statements + with_page_tables(conn, nearest, set(statements))
-    return within_budget(fetch(conn, ordered, vector), int(os.environ["CONTEXT_TOKEN_BUDGET"]))
-
-
-def with_page_tables(conn: psycopg.Connection, nearest: list[int], skip: set[int]) -> list[int]:
-    """Put up to PAGE_TABLES_MAX other tables from the nearest chunks' pages after each chunk."""
-    rows = conn.execute(
-        """
-        SELECT c.id, t.id FROM chunks c
-        JOIN chunks t ON t.filing_id = c.filing_id AND t.page = c.page AND t.is_table
-        WHERE c.id = ANY(%s) ORDER BY t.chunk_index
-        """,
-        (nearest,),
-    ).fetchall()
-    left = int(os.environ["PAGE_TABLES_MAX"])
-    seen = set(nearest) | skip
-    ordered: list[int] = []
-    for chunk_id in nearest:
-        ordered.append(chunk_id)
-        for source, table_id in rows:
-            if source == chunk_id and table_id not in seen and left > 0:
-                ordered.append(table_id)
-                seen.add(table_id)
-                left -= 1
-    return ordered
+    budget = int(os.environ["CONTEXT_TOKEN_BUDGET"])
+    return within_budget(fetch(conn, statements + nearest, vector), budget)
 
 
 def within_budget(passages: list[Passage], budget: int) -> list[Passage]:
