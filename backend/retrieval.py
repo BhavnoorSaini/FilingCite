@@ -32,44 +32,66 @@ class Passage:
 
 @dataclass(frozen=True)
 class Statement:
-    asked: re.Pattern  # the statement's name, or a line item found on it
-    title: str  # regex for its title on the page (Postgres syntax)
-    line_items: tuple[str, ...]  # regexes that all appear in the statement's table
+    title: str  # how the statement is titled on its page
+    line_items: list[str]  # all of these appear in the statement's own table
+    asked_as: list[str]  # other words in a question that mean this statement is needed
+
+    def is_asked(self, question: str) -> bool:
+        return bool(re.search("|".join([self.title, *self.asked_as]), question, re.IGNORECASE))
 
 
-STATEMENTS = (
-    Statement(
-        re.compile(
-            r"balance sheets?|statements? of financial (?:position|condition)"
-            r"|total assets|(?:current|total) liabilities|current assets|working capital"
-            r"|accounts (?:payable|receivable)|inventor(?:y|ies)|property, plant|PP&E"
-            r"|(?:shareholders|stockholders)'? equity",
-            re.IGNORECASE,
-        ),
-        r"balance sheets?|statements? of financial (?:position|condition)",
-        (r"total assets", r"total liabilities"),
+# Patterns work in both Python and Postgres.
+STATEMENTS = [
+    Statement(  # balance sheet
+        title=r"balance sheets?|statements? of financial (?:position|condition)",
+        line_items=["total assets", "total liabilities"],
+        asked_as=[
+            "total assets",
+            "(?:current|total) liabilities",
+            "current assets",
+            "working capital",
+            "accounts (?:payable|receivable)",
+            "inventor(?:y|ies)",
+            "property, plant",
+            "PP&E",
+            "(?:shareholders|stockholders)'? equity",
+        ],
     ),
-    Statement(
-        re.compile(
-            r"income statements?|statements? of (?:income|operations|earnings)"
-            r"|revenues?|net sales|COGS|cost of (?:goods sold|sales|revenue)|gross (?:profit|margin)"
-            r"|operating (?:income|margin|profit)|net (?:income|earnings)|EBIT|EPS|per share",
-            re.IGNORECASE,
-        ),
-        r"statements? of (?:consolidated )?(?:income|operations|earnings)(?! and comprehensive)"
+    Statement(  # income statement
+        title=r"statements? of (?:consolidated )?(?:income|operations|earnings)(?! and comprehensive)"
         r"|income statements?",
-        (r"net (?:income|earnings|loss)", r"per (?:common )?share", r"revenue|net sales|sales"),
+        line_items=[
+            "net (?:income|earnings|loss)",
+            "per (?:common )?share",
+            "revenue|net sales|sales",
+        ],
+        asked_as=[
+            "revenues?",
+            "net sales",
+            "COGS",
+            "cost of (?:goods sold|sales|revenue)",
+            "gross (?:profit|margin)",
+            "operating (?:income|margin|profit)",
+            "net (?:income|earnings)",
+            "EBIT",
+            "EPS",
+            "per share",
+        ],
     ),
-    Statement(
-        re.compile(
-            r"cash flows?|capital expenditures?|capex|dividends? paid|purchases? of property"
-            r"|depreciation and amortization|D&A",
-            re.IGNORECASE,
-        ),
-        r"statements? of (?:consolidated )?cash flows?",
-        (r"operating activities", r"investing activities", r"financing activities"),
+    Statement(  # cash flow statement
+        title=r"statements? of (?:consolidated )?cash flows?",
+        line_items=["operating activities", "investing activities", "financing activities"],
+        asked_as=[
+            "cash flows?",
+            "capital expenditures?",
+            "capex",
+            "dividends? paid",
+            "purchases? of property",
+            "depreciation and amortization",
+            "D&A",
+        ],
     ),
-)
+]
 
 YEAR = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")  # also inside "FY2018"
 
@@ -85,15 +107,20 @@ def years_in(question: str) -> set[int]:
 
 def filings_named(conn: psycopg.Connection, question: str) -> list[int] | None:
     """Filing ids for the companies (and years) the question names, or None to search everything."""
-    filings = conn.execute("SELECT id, company, doc_period FROM filings").fetchall()
     asked = f" {normalize(question)} "
-    by_company = [f for f in filings if f" {normalize(f[1])} " in asked]
-    if not by_company:
+    named = [
+        (filing_id, period)
+        for filing_id, company, period in conn.execute(
+            "SELECT id, company, doc_period FROM filings"
+        )
+        if f" {normalize(company)} " in asked
+    ]
+    if not named:
         return None
     # A year's figures also appear in the next year's filing, and forecasts in the previous one.
-    window = {y + d for y in years_in(question) for d in (-1, 0, 1)}
-    by_year = [f for f in by_company if f[2] in window]
-    return [f[0] for f in (by_year or by_company)]
+    years = {y + d for y in years_in(question) for d in (-1, 0, 1)}
+    in_years = [filing_id for filing_id, period in named if period in years]
+    return in_years or [filing_id for filing_id, _ in named]
 
 
 def statement_tables(conn: psycopg.Connection, question: str, filings: list[int]) -> list[int]:
@@ -104,9 +131,15 @@ def statement_tables(conn: psycopg.Connection, question: str, filings: list[int]
     it covers both years), then the earliest page: primary statements come before the notes.
     """
     years = years_in(question)
+
+    def preference(row):
+        _, _, period, page = row
+        distance = min((abs(period - y) for y in years), default=0)
+        return distance, -period, page
+
     tables: list[int] = []
     for statement in STATEMENTS:
-        if not statement.asked.search(question):
+        if not statement.is_asked(question):
             continue
         rows = conn.execute(
             """
@@ -117,12 +150,11 @@ def statement_tables(conn: psycopg.Connection, question: str, filings: list[int]
                           AND t.page = c.page AND left(t.content, 200) ~* %s)
             ORDER BY c.chunk_index
             """,
-            (filings, list(statement.line_items), statement.title),
+            (filings, statement.line_items, statement.title),
         ).fetchall()
         if rows:
-            gap = lambda r: min((abs(r[2] - y) for y in years), default=0)
-            best = min(rows, key=lambda r: (gap(r), -r[2], r[3]))
-            tables += [r[0] for r in rows if (r[1], r[3]) == (best[1], best[3])]
+            _, filing, _, page = min(rows, key=preference)
+            tables += [row[0] for row in rows if (row[1], row[3]) == (filing, page)]
     return tables
 
 
@@ -132,20 +164,17 @@ def search(conn: psycopg.Connection, question: str, k: int) -> list[Passage]:
     filings = filings_named(conn, question)
     statements = statement_tables(conn, question, filings) if filings else []
     # Exact nearest neighbours (no approximate index): fast enough at this size.
-    nearest = [
-        row[0]
-        for row in conn.execute(
-            """
-            SELECT id FROM chunks
-            WHERE (%(filings)s::bigint[] IS NULL OR filing_id = ANY(%(filings)s))
-              AND id <> ALL(%(statements)s)
-            ORDER BY embedding <=> %(v)s LIMIT %(k)s
-            """,
-            {"filings": filings, "statements": statements, "v": vector, "k": k},
-        )
-    ]
-    budget = int(os.environ["CONTEXT_TOKEN_BUDGET"])
-    return within_budget(fetch(conn, statements + nearest, vector), budget)
+    nearest = conn.execute(
+        """
+        SELECT id FROM chunks
+        WHERE (%(filings)s::bigint[] IS NULL OR filing_id = ANY(%(filings)s))
+          AND id <> ALL(%(statements)s)
+        ORDER BY embedding <=> %(v)s LIMIT %(k)s
+        """,
+        {"filings": filings, "statements": statements, "v": vector, "k": k},
+    ).fetchall()
+    passages = fetch(conn, statements + [row[0] for row in nearest], vector)
+    return within_budget(passages, int(os.environ["CONTEXT_TOKEN_BUDGET"]))
 
 
 def within_budget(passages: list[Passage], budget: int) -> list[Passage]:

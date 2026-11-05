@@ -41,32 +41,36 @@ def parse(value: str) -> Decimal | None:
 
 
 def calculate(operation: Operation, inputs: list[Decimal]) -> Decimal | None:
-    """Percent change takes [old, new]; ratio and percentage [part, whole]; difference [a, b] = a - b.
-
-    Sum, average and product take two or more inputs.
-    """
+    """Do one calculation, or return None if its inputs don't fit it."""
     if operation in ("sum", "average", "product"):
         if len(inputs) < 2:
             return None
-        if operation == "product":
-            return math.prod(inputs, start=Decimal(1))
-        return sum(inputs) / (len(inputs) if operation == "average" else 1)
-    if len(inputs) != 2:
+    elif len(inputs) != 2:
         return None
-    a, b = inputs
-    if operation == "difference":
-        return a - b
-    if operation in ("ratio", "percentage"):
-        if not b:
-            return None
-        return a / b * (100 if operation == "percentage" else 1)
-    if operation == "percent_change":
-        if not a:
-            return None
-        if (a < 0) == (b < 0):
-            # Same sign: change in size, so capex going (1,373) -> (1,577) is growth.
-            a, b = abs(a), abs(b)
-        return (b - a) / abs(a) * 100
+
+    match operation:
+        case "sum":
+            return sum(inputs)
+        case "average":
+            return sum(inputs) / len(inputs)
+        case "product":
+            return math.prod(inputs)
+        case "difference":
+            a, b = inputs
+            return a - b
+        case "ratio" | "percentage":
+            part, whole = inputs
+            if not whole:
+                return None
+            return part / whole * (100 if operation == "percentage" else 1)
+        case "percent_change":
+            old, new = inputs
+            if not old:
+                return None
+            if (old < 0) == (new < 0):
+                # Same sign: change in size, so capex going (1,373) -> (1,577) is growth.
+                old, new = abs(old), abs(new)
+            return (new - old) / abs(old) * 100
     return None
 
 
