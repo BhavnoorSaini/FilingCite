@@ -1,7 +1,7 @@
 """Question -> cited answer, or an honest refusal.
 
-Python decides every refusal and does all arithmetic; the model only drafts the
-answer from the passages it is given.
+Python decides every refusal and does all arithmetic; the model only drafts the answer
+from the passages it is given.
 """
 
 import os
@@ -19,19 +19,21 @@ from retrieval import Passage, search
 RefusalReason = Literal[
     "weak_match", "not_in_filings", "malformed_reply", "invalid_citation", "unverified_number"
 ]
-
-REFUSAL_MESSAGES: dict[str, str] = {
-    "weak_match": "I don't know. Nothing in the loaded filings closely matches this question.",
-    "not_in_filings": "I don't know. The filings I found don't contain the answer.",
-    "malformed_reply": "I don't know. The answer couldn't be checked, so it isn't shown.",
-    "invalid_citation": "I don't know. The draft answer cited text it wasn't given, so it isn't shown.",
-    "unverified_number": (
-        "I don't know. The draft answer used a number I couldn't trace to the cited pages, "
-        "so it isn't shown."
-    ),
+REFUSAL_MESSAGES = {
+    "weak_match": "Nothing in the loaded filings closely matches this question.",
+    "not_in_filings": "The filings I found don't contain the answer.",
+    "malformed_reply": "The answer couldn't be checked, so it isn't shown.",
+    "invalid_citation": "The draft answer cited text it wasn't given, so it isn't shown.",
+    "unverified_number": "The draft used a number I couldn't trace to the cited pages.",
 }
 
 PLACEHOLDER = re.compile(r"\{c(\d+)\}")
+# A placeholder plus any "%" the model wrote after it: Python decides whether a result is
+# a percentage, so a ratio of 0.103 is never shown as "0.103%".
+PLACEHOLDER_IN_ANSWER = re.compile(r"\{c(\d+)\}(?:\s?%|\s+percent\b)?")
+# Unit conversions may be calculation inputs: they change a traced figure's scale but
+# can't invent its digits, and they show in the working.
+UNIT_FACTORS = {Decimal(100), Decimal(1000), Decimal(1000000)}
 
 
 class Citation(BaseModel):
@@ -52,117 +54,109 @@ class CalculationResult(BaseModel):
 
 class AskResponse(BaseModel):
     answered: bool
-    answer: str | None
-    citations: list[Citation]
-    calculations: list[CalculationResult]
-    refusal: RefusalReason | None
-    message: str | None
+    answer: str | None = None
+    citations: list[Citation] = []
+    calculations: list[CalculationResult] = []
+    refusal: RefusalReason | None = None
+    message: str | None = None
 
 
 def refuse(reason: RefusalReason) -> AskResponse:
-    return AskResponse(
-        answered=False,
-        answer=None,
-        citations=[],
-        calculations=[],
-        refusal=reason,
-        message=REFUSAL_MESSAGES[reason],
-    )
-
-
-def check_reply(raw: str, passages: list[Passage]) -> Reply | RefusalReason:
-    """Parse the model's reply and make sure it only cites excerpts it was given."""
-    try:
-        reply = Reply.model_validate_json(raw)
-    except ValidationError:
-        return "malformed_reply"
-    if reply.status == "not_in_excerpts":
-        return "not_in_filings"
-    if not reply.answer.strip() or not reply.cited_excerpts:
-        return "malformed_reply"
-
-    given = set(range(1, len(passages) + 1))
-    cited = set(reply.cited_excerpts)
-    if not cited <= given or any(n.excerpt not in cited for n in reply.numbers):
-        return "invalid_citation"
-    return reply
+    message = f"I don't know. {REFUSAL_MESSAGES[reason]}"
+    return AskResponse(answered=False, refusal=reason, message=message)
 
 
 def check_numbers(
-    reply: Reply, passages: list[Passage], verify: bool = True
+    reply: Reply, passages: list[Passage], question: str, verify: bool
 ) -> tuple[str, list[CalculationResult]] | RefusalReason:
     """Every number must be on a cited page, or be computed here from numbers that are.
 
-    Returns the answer with calculation results filled in. verify=False skips the
-    traceability checks (still doing the arithmetic) so the eval can compare off vs on.
+    Calculation inputs may also come from the question (like 365 in a formula the user
+    defined) or be unit factors, as "excerpt 0". Numbers in the answer text must be on a
+    cited page, be a computed result, or be a year the question mentions, so echoing a
+    figure from a leading question doesn't pass. verify=False skips the tracing (still doing
+    the arithmetic) so the eval can compare the number check off and on.
     """
-    # The excerpt label (company, fiscal year) counts as part of the page, so "3M" and "2018" pass.
+    # The excerpt label (company, fiscal year) counts as part of its page: "3M", "2018".
     on_page = {
         i: values_in(f"{p.company} {p.content}") | {Decimal(p.doc_period)}
         for i, p in enumerate(passages, 1)
     }
-    cited = set(reply.cited_excerpts)
+    on_page[0] = values_in(question)
 
-    def traceable(value: str, excerpt: int) -> bool:
+    def traced(value: str, excerpt: int) -> bool:
         number = parse(value)
-        if not verify:
-            return number is not None
-        return number is not None and abs(number).normalize() in on_page[excerpt]
+        known = on_page.get(excerpt, set()) | UNIT_FACTORS
+        return number is not None and (not verify or abs(number).normalize() in known)
 
-    if not all(traceable(n.value, n.excerpt) for n in reply.numbers):
+    if not all(traced(n.value, n.excerpt) for n in reply.numbers):
         return "unverified_number"
 
-    decimals = int(os.environ["CALC_DECIMALS"])
-    results: list[Decimal] = []
+    results: list[tuple[Decimal, bool]] = []  # (value, is a percentage)
     shown: list[CalculationResult] = []
     for calc in reply.calculations:
-        inputs = []
+        inputs: list[tuple[Decimal, bool]] = []
         for item in calc.inputs:
             earlier = PLACEHOLDER.fullmatch(item.value.strip())
             if earlier:  # the exact result of an earlier calculation
-                index = int(earlier.group(1))
-                if not 1 <= index <= len(results):
+                if not 1 <= int(earlier[1]) <= len(results):
                     return "malformed_reply"
-                inputs.append(results[index - 1])
-            elif item.excerpt not in cited:
+                inputs.append(results[int(earlier[1]) - 1])
+            elif item.excerpt not in {0, *reply.cited_excerpts}:
                 return "invalid_citation"
-            elif not traceable(item.value, item.excerpt):
+            elif not traced(item.value, item.excerpt):
                 return "unverified_number"
             else:
-                inputs.append(parse(item.value))
-        result = calculate(calc.operation, inputs)
+                inputs.append((parse(item.value), False))
+        result = calculate(calc.operation, [value for value, _ in inputs])
         if result is None:
             return "malformed_reply"
-        results.append(result)
+        # Averages, sums and differences of percentages are percentages too.
+        percent = calc.operation in ("percent_change", "percentage") or (
+            calc.operation in ("average", "sum", "difference") and all(p for _, p in inputs)
+        )
+        whole = not percent and calc.operation != "ratio" and result == result.to_integral_value()
+        results.append((result, percent))
         shown.append(
             CalculationResult(
                 operation=calc.operation,
                 inputs=[i.value for i in calc.inputs],
-                result=format_result(calc.operation, result, inputs, decimals),
+                result=format_result(result, percent, whole, int(os.environ["CALC_DECIMALS"])),
             )
         )
 
-    # Numbers written in the answer itself, ignoring the {c1} placeholders.
-    cited_values = set().union(*(on_page[i] for i in cited))
-    if verify and not values_in(PLACEHOLDER.sub(" ", reply.answer)) <= cited_values:
+    allowed = set().union(*(on_page[i] for i in reply.cited_excerpts))
+    allowed |= {y for y in on_page[0] if y == y.to_integral_value() and 1900 <= y <= 2100}
+    allowed |= set().union(*(values_in(c.result) for c in shown))
+    if verify and not values_in(PLACEHOLDER.sub(" ", reply.answer)) <= allowed:
         return "unverified_number"
     if any(not 1 <= int(i) <= len(shown) for i in PLACEHOLDER.findall(reply.answer)):
         return "malformed_reply"
-    answer = PLACEHOLDER.sub(lambda m: shown[int(m.group(1)) - 1].result, reply.answer)
-    return answer, shown
+    return PLACEHOLDER_IN_ANSWER.sub(lambda m: shown[int(m[1]) - 1].result, reply.answer), shown
 
 
-def respond(raw: str, passages: list[Passage], verify_numbers: bool = True) -> AskResponse:
-    """Turn the model's raw reply into the response the user sees."""
-    reply = check_reply(raw, passages)
-    if isinstance(reply, str):
-        return refuse(reply)
-    checked = check_numbers(reply, passages, verify_numbers)
+def respond(
+    raw: str, passages: list[Passage], question: str, verify_numbers: bool = True
+) -> AskResponse:
+    """Check the model's raw reply and turn it into what the user sees."""
+    try:
+        reply = Reply.model_validate_json(raw)
+    except ValidationError:
+        return refuse("malformed_reply")
+    if reply.status == "not_in_excerpts":
+        return refuse("not_in_filings")
+    if not reply.answer.strip() or not reply.cited_excerpts:
+        return refuse("malformed_reply")
+    cited = list(dict.fromkeys(reply.cited_excerpts))  # keep order, drop repeats
+    if not set(cited) <= set(range(1, len(passages) + 1)) or any(
+        n.excerpt not in {0, *cited} for n in reply.numbers
+    ):
+        return refuse("invalid_citation")
+
+    checked = check_numbers(reply, passages, question, verify_numbers)
     if isinstance(checked, str):
         return refuse(checked)
     answer, calculations = checked
-
-    cited = list(dict.fromkeys(reply.cited_excerpts))  # keep order, drop repeats
     citations = [
         Citation(
             number=i,
@@ -175,18 +169,12 @@ def respond(raw: str, passages: list[Passage], verify_numbers: bool = True) -> A
         )
         for i, p in enumerate((passages[n - 1] for n in cited), 1)
     ]
-    return AskResponse(
-        answered=True,
-        answer=answer,
-        citations=citations,
-        calculations=calculations,
-        refusal=None,
-        message=None,
-    )
+    return AskResponse(answered=True, answer=answer, citations=citations, calculations=calculations)
 
 
 def answer_question(conn: psycopg.Connection, question: str, model: Model) -> AskResponse:
     passages = search(conn, question, int(os.environ["RETRIEVAL_TOP_K"]))
-    if not passages or passages[0].similarity < float(os.environ["MIN_SIMILARITY"]):
+    # Refuse when even the closest chunk in meaning is a weak match.
+    if not passages or max(p.similarity for p in passages) < float(os.environ["MIN_SIMILARITY"]):
         return refuse("weak_match")
-    return respond(model(build_prompt(question, passages)), passages)
+    return respond(model(build_prompt(question, passages)), passages, question)

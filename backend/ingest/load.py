@@ -5,47 +5,53 @@ Usage (from backend/):
     uv run --group ingest --env-file ../.env python -m ingest.load 3M_2018_10K  # specific filings
     add --force to reload filings that are already loaded
 
-Re-running is safe: a filing's chunks are replaced in one transaction, never duplicated.
+Docling's output is cached as JSON, so re-runs skip the slow parse. Re-running is safe: a
+filing's chunks are replaced in one transaction, never duplicated.
 """
 
 import argparse
 import json
-import logging
 import os
 import time
 from pathlib import Path
 
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling_core.types.doc import DoclingDocument
+
 from db import connect
 from embedding import BACKEND_DIR, embed_passages
 from ingest.chunk import chunk_document
-from ingest.parse import make_converter, parse
-
-log = logging.getLogger("ingest")
-
-FILING_FIELDS = ("doc_name", "company", "doc_type", "doc_period", "doc_link")
-
-
-def env_path(var: str) -> Path:
-    return BACKEND_DIR / os.environ[var]  # relative to backend/; absolute paths stay as-is
 
 
 def read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
-def save_filing(meta: dict, chunks, embeddings) -> None:
+def parse(pdf: Path, cache_dir: Path, converter: DocumentConverter) -> DoclingDocument:
+    cached = cache_dir / f"{pdf.stem}.json"
+    if not cached.exists():
+        result = converter.convert(pdf)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        result.document.save_as_json(cached)
+        return result.document
+    return DoclingDocument.load_from_json(cached)
+
+
+def save(meta: dict, chunks, embeddings) -> None:
     # A fresh connection per filing: Neon suspends idle computes while a long PDF parses.
     with connect() as conn, conn.transaction():
         filing_id = conn.execute(
             """
             INSERT INTO filings (doc_name, company, doc_type, doc_period, doc_link)
             VALUES (%(doc_name)s, %(company)s, %(doc_type)s, %(doc_period)s, %(doc_link)s)
-            ON CONFLICT (doc_name) DO UPDATE SET
-                company = EXCLUDED.company, doc_type = EXCLUDED.doc_type,
-                doc_period = EXCLUDED.doc_period, doc_link = EXCLUDED.doc_link
+            ON CONFLICT (doc_name) DO UPDATE SET company = EXCLUDED.company,
+                doc_type = EXCLUDED.doc_type, doc_period = EXCLUDED.doc_period,
+                doc_link = EXCLUDED.doc_link
             RETURNING id
             """,
-            meta,
+            {k: meta.get(k) for k in ("doc_name", "company", "doc_type", "doc_period", "doc_link")},
         ).fetchone()[0]
         conn.execute("DELETE FROM chunks WHERE filing_id = %s", (filing_id,))
         conn.cursor().executemany(
@@ -63,40 +69,28 @@ def main() -> None:
     parser.add_argument("doc_names", nargs="*", help="default: every filing used by a question")
     parser.add_argument("--force", action="store_true", help="reload filings already loaded")
     args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
 
-    data_dir = env_path("FINANCEBENCH_DIR") / "data"
-    pdf_dir = env_path("FINANCEBENCH_DIR") / "pdfs"
-    parsed_dir = env_path("PARSED_DIR")
-    max_words = int(os.environ["CHUNK_WORDS"])
-
-    metadata = {
-        d["doc_name"]: d for d in read_jsonl(data_dir / "financebench_document_information.jsonl")
-    }
-    names = args.doc_names or sorted(
-        {q["doc_name"] for q in read_jsonl(data_dir / "financebench_open_source.jsonl")}
-    )
+    root = BACKEND_DIR / os.environ["FINANCEBENCH_DIR"]  # absolute paths stay as-is
+    cache_dir = BACKEND_DIR / os.environ["PARSED_DIR"]
+    info = read_jsonl(root / "data/financebench_document_information.jsonl")
+    metadata = {d["doc_name"]: d for d in info}
+    questions = read_jsonl(root / "data/financebench_open_source.jsonl")
+    names = args.doc_names or sorted({q["doc_name"] for q in questions})
     with connect() as conn:
-        loaded = {
-            row[0]
-            for row in conn.execute(
-                "SELECT doc_name FROM filings f"
-                " WHERE EXISTS (SELECT 1 FROM chunks c WHERE c.filing_id = f.id)"
-            )
-        }
+        loaded = {r[0] for r in conn.execute("SELECT doc_name FROM filings")}
 
-    converter = make_converter()
+    options = PdfPipelineOptions(do_ocr=False)  # FinanceBench PDFs have a text layer
+    converter = DocumentConverter(
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)}
+    )
     for i, name in enumerate(names, 1):
-        progress = f"[{i}/{len(names)}] {name}"
         if name in loaded and not args.force:
-            log.info("%s: already loaded, skipping", progress)
             continue
         start = time.monotonic()
-        doc = parse(pdf_dir / f"{name}.pdf", parsed_dir, converter)
-        chunks = chunk_document(doc, max_words)
-        embeddings = embed_passages([c.content for c in chunks])
-        save_filing({k: metadata[name].get(k) for k in FILING_FIELDS}, chunks, embeddings)
-        log.info("%s: %d chunks in %.0fs", progress, len(chunks), time.monotonic() - start)
+        doc = parse(root / "pdfs" / f"{name}.pdf", cache_dir, converter)
+        chunks = chunk_document(doc, int(os.environ["CHUNK_WORDS"]))
+        save(metadata[name], chunks, embed_passages([c.content for c in chunks]))
+        print(f"[{i}/{len(names)}] {name}: {len(chunks)} chunks in {time.monotonic() - start:.0f}s")
 
 
 if __name__ == "__main__":

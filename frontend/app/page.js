@@ -21,16 +21,23 @@ function input(value) {
 }
 
 function describe({ operation, inputs, result }) {
-  const [a, b] = inputs.map(input);
+  const values = inputs.map(input);
+  const [a, b] = values;
   switch (operation) {
     case "percent_change":
       return `Change from ${a} to ${b} = ${result}`;
     case "ratio":
       return `${a} ÷ ${b} = ${result}`;
+    case "percentage":
+      return `${a} ÷ ${b} × 100 = ${result}`;
     case "difference":
       return `${a} − ${b} = ${result}`;
+    case "average":
+      return `Average of ${values.join(", ")} = ${result}`;
+    case "product":
+      return `${values.join(" × ")} = ${result}`;
     default:
-      return `${inputs.map(input).join(" + ")} = ${result}`;
+      return `${values.join(" + ")} = ${result}`;
   }
 }
 

@@ -24,6 +24,3 @@ CREATE TABLE IF NOT EXISTS chunks (
     embedding   vector({embedding_dim}) NOT NULL,
     UNIQUE (filing_id, page, chunk_index)
 );
-
-CREATE INDEX IF NOT EXISTS chunks_embedding_idx
-    ON chunks USING hnsw (embedding vector_cosine_ops);

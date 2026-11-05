@@ -1,11 +1,13 @@
-"""The answer-writing model: reply schema, prompt and Groq call.
+"""The answer-writing model: reply schema, prompt and the API call.
 
-The model only writes and cites. It never does arithmetic or decides whether
-an answer is correct; Python checks its reply (see answer.py).
+The model only writes and cites. It never does arithmetic or decides whether an answer
+is correct; Python checks its reply (see answer.py).
 """
 
+import json
 import os
-from typing import Literal, Protocol
+from collections.abc import Callable
+from typing import Literal
 
 from openai import OpenAI
 from pydantic import BaseModel, ConfigDict
@@ -13,37 +15,29 @@ from pydantic import BaseModel, ConfigDict
 from figures import Operation
 from retrieval import Passage
 
-
-class UsedNumber(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    value: str  # exactly as written in the excerpt, e.g. "$1,577" or "(1,577)"
-    excerpt: int  # the excerpt it was copied from (0 for an earlier result like "{c1}")
+Model = Callable[[str], str]  # prompt -> raw reply text; tests pass a fake
 
 
-class Calculation(BaseModel):
-    """A calculation the model asks for; Python does the arithmetic."""
+class Strict(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # strict structured outputs need this
 
-    model_config = ConfigDict(extra="forbid")
 
+class UsedNumber(Strict):
+    value: str  # as written in the excerpt, e.g. "(1,577)"
+    excerpt: int  # 0 = the question itself, a unit factor or an earlier result "{c1}"
+
+
+class Calculation(Strict):
     operation: Operation
-    inputs: list[UsedNumber]  # percent_change: [old, new]; ratio: [top, bottom]; difference: a - b
+    inputs: list[UsedNumber]
 
 
-class Reply(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class Reply(Strict):
     status: Literal["answered", "not_in_excerpts"]
     answer: str  # may contain {c1}, {c2}... where calculation results go
     cited_excerpts: list[int]
     numbers: list[UsedNumber]
     calculations: list[Calculation]
-
-
-class Model(Protocol):
-    """Anything that turns a prompt into raw reply text; tests pass a fake."""
-
-    def __call__(self, prompt: str) -> str: ...
 
 
 INSTRUCTIONS = """You answer questions about SEC filings using ONLY the numbered excerpts below.
@@ -52,20 +46,29 @@ Rules:
 - Use only facts stated in the excerpts. Never use outside knowledge.
 - If the excerpts do not contain what is needed, set status to "not_in_excerpts" \
 and leave answer empty and all lists empty.
-- Copy every number exactly as written in an excerpt. Never round, convert units \
-or rewrite a number (do not turn "1,577" million into "1.6 billion"). If the question \
-asks for one unit but the excerpt uses another, give the figure as written with the \
-excerpt's unit (e.g. "$381,603 thousand"); never divide by 1,000 to convert it.
+- Copy every number exactly as written in an excerpt. Never round or rewrite a number \
+(do not turn "2,345" million into "2.3 billion").
 - Write years in full (2022, not FY22).
-- Never do arithmetic yourself. If the answer needs a calculation, add it to \
-calculations with one of these operations and its inputs copied from the excerpts:
+- Never do arithmetic yourself. If the answer needs a calculation, add it to calculations \
+with one of these operations and its inputs copied from the excerpts:
   percent_change: inputs [old, new]
-  ratio: inputs [numerator, denominator]
+  percentage: inputs [part, whole], giving part / whole as a percent; use it for any \
+margin or "as a %" figure
+  ratio: inputs [numerator, denominator], for plain ratios such as a current ratio
   difference: inputs [a, b] meaning a minus b
   sum: two or more inputs
-  Then write {c1} in the answer where the first calculation's result goes, {c2} \
-for the second, and so on. For a two-step calculation, an input may be {c1} \
-(with excerpt 0) to use an earlier result, e.g. gross margin = ratio of {c1} to revenue.
+  average: two or more inputs (e.g. average total assets over two years); never divide \
+a sum by 2 instead
+  product: two or more inputs multiplied (e.g. 365 times a ratio)
+- Calculation inputs may also be, with excerpt 0: an earlier result such as {c1}; a \
+number the question itself gives (e.g. 365 in a formula it defines); or 1,000 or \
+1,000,000 to convert units.
+- All inputs to one calculation must be in the same unit (e.g. all in $ millions). If \
+two tables use different units, convert one first. If the question asks for a different \
+unit than the excerpt's, give the figure with the excerpt's unit (e.g. "$45,210 \
+thousand") or convert it with a calculation.
+- Write {c1} in the answer where the first calculation's result goes, {c2} for the \
+second, and so on. Don't write "%" after a placeholder: results come with their units.
 - Put the number of every excerpt you relied on in cited_excerpts.
 - List every number that appears in your answer in numbers, with the excerpt it came \
 from. Years and fiscal periods count. Do not list the {c1} placeholders.
@@ -80,29 +83,24 @@ def build_prompt(question: str, passages: list[Passage]) -> str:
     return f"{INSTRUCTIONS}\n\nExcerpts:\n\n{excerpts}\n\nQuestion: {question}"
 
 
-class GroqModel:
-    """Calls Groq with a strict reply schema. last_tokens records each call's usage for the eval."""
+def chat_model() -> Model:
+    """Call an OpenAI-compatible API (Groq or OpenRouter) with a strict reply schema.
 
-    def __init__(self) -> None:
-        self.client = OpenAI(
-            base_url=os.environ["GROQ_BASE_URL"], api_key=os.environ["GROQ_API_KEY"]
-        )
-        self.schema = {
-            "type": "json_schema",
-            "json_schema": {"name": "reply", "strict": True, "schema": Reply.model_json_schema()},
-        }
-        self.last_tokens = 0
+    Provider-specific options (reasoning effort, routing) come from LLM_EXTRA_BODY as JSON.
+    """
+    client = OpenAI(base_url=os.environ["LLM_BASE_URL"], api_key=os.environ["LLM_API_KEY"])
+    schema = {"name": "reply", "strict": True, "schema": Reply.model_json_schema()}
 
-    def __call__(self, prompt: str) -> str:
-        response = self.client.chat.completions.create(
-            model=os.environ["GROQ_MODEL"],
-            # Groq recommends putting all instructions in the user message for reasoning models.
+    def call(prompt: str) -> str:
+        response = client.chat.completions.create(
+            model=os.environ["LLM_MODEL"],
+            # Reasoning models do best with all instructions in the user message.
             messages=[{"role": "user", "content": prompt}],
-            response_format=self.schema,
-            reasoning_effort=os.environ["GROQ_REASONING_EFFORT"],
-            max_completion_tokens=int(os.environ["GROQ_MAX_COMPLETION_TOKENS"]),
+            response_format={"type": "json_schema", "json_schema": schema},
+            max_completion_tokens=int(os.environ["LLM_MAX_COMPLETION_TOKENS"]),
             temperature=0,
-            extra_body={"include_reasoning": False},
+            extra_body=json.loads(os.environ["LLM_EXTRA_BODY"]),
         )
-        self.last_tokens = response.usage.total_tokens if response.usage else 0
         return response.choices[0].message.content or ""
+
+    return call
