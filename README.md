@@ -20,36 +20,37 @@ The 150 [FinanceBench](https://github.com/patronus-ai/financebench) open-source 
 
 | Metric | Result |
 | --- | --- |
-| Found the right page | 94/150 (63%) |
-| Answered correctly (numeric answers within 1%) | 43/54 (80%) |
+| Found the right page | 102/150 (68%) |
+| Answered correctly (numeric answers within 1%) | 44/54 (81%) |
 | Refused correctly | 15/15 (100%) |
-| Blocked a number | 2 |
+| Blocked a number | 6 |
 
 Only the 54 short numeric answers are graded; the 96 written ones need judgement.
 
 | Number check | Off | On |
 | --- | --- | --- |
-| Questions answered | 100 | 98 |
-| Numeric answers correct | 43 | 43 |
-| Numeric answers wrong | 4 | 4 |
+| Questions answered | 108 | 102 |
+| Numeric answers correct | 46 | 44 |
+| Numeric answers wrong | 2 | 2 |
 
 The model rarely invents a figure outright, so the check mostly guarantees that every number
-shown is traceable. Of the two answers it blocked, one was correct (Boeing, below).
+shown is traceable. In this run it stopped no wrong numeric answers and blocked two correct
+ones (MGM and Walmart, below): its value is the guarantee, not accuracy.
 
 ## How it works
 
 1. **Ingest, once on a Mac** ([backend/ingest](backend/ingest)): Docling reads each PDF into
    text and tables with page numbers. Text becomes ~300-word chunks that never cross a page;
    tables stay whole. FastEmbed (bge-small-en-v1.5) embeds them into Neon Postgres with pgvector.
-2. **Retrieve** ([retrieval.py](backend/retrieval.py)): search the filings of the company and
-   year the question names. If it names a financial statement or a line item on one, put that
-   statement's table first, then the closest chunks by meaning.
+2. **Retrieve** ([retrieval.py](backend/retrieval.py)): search the filings of the company (by name
+   or ticker) and year the question names. If it names a financial statement or a line item
+   on one, put that statement's table first, then the closest chunks by meaning.
 3. **Draft** ([llm.py](backend/llm.py)): if even the best chunk is a weak match, refuse.
    Otherwise gpt-oss-120b on Groq replies in strict JSON: the answer, the excerpts it cites, the
    numbers it used, and any calculations.
 4. **Check** ([answer.py](backend/answer.py)): refuse if the reply is malformed, cites an
    excerpt it wasn't given, or uses a number that isn't on a cited page. Python runs the
-   calculations and fills in the results.
+   calculations, rounds them as the question asks, and fills in the results.
 
 ## Quickstart
 
@@ -71,7 +72,7 @@ Tests (fake model, no network) and the eval (resumable):
 ```bash
 cd backend
 uv run pytest
-uv run --env-file ../.env python -m evals.run --set full --name full
+uv run --env-file ../.env python -m evals.run --name full
 uv run --env-file ../.env python -m evals.score --name full
 ```
 
@@ -82,24 +83,29 @@ uploads, accounts, or filings outside FinanceBench.
 
 ## Known limits
 
-- Retrieval misses 37% of evidence pages, mostly for narrative questions answered in long
+- Retrieval misses 32% of evidence pages, mostly for narrative questions answered in long
   MD&A text.
 - The number check can't catch a wrong choice of real numbers, or answers with no numbers.
-- Companies are matched by name, so tickers like "JPM" search every filing.
+- Companies are matched by name or official ticker ("JPM", "JnJ"), so nicknames like
+  "AMEX" search every filing.
+- Figures from the question can only appear in the answer if a calculation used them, so
+  phrases like "3-year" or "over 20%" block some correct answers.
 - Zero is always blocked, since filings print a dash instead.
-- The live site uses Groq's free tier, so it can fail under load.
+- The live site uses Groq's free tier, so it can fail under load. Its limits also cap a reply,
+  reasoning included, at 4,096 tokens; long multi-step questions sometimes run out and are
+  refused (with 8,192 they mostly pass).
 
 ## Three real wrong answers
 
-1. **Netflix's FY2015 EBITDA margin: 56.83% (expected 5.4%).** For depreciation and
-   amortization the model added the amortization of streaming content (3,405,382) to the
-   real D&A line. Every number was on the cash flow statement, so the number check let it
-   through: it can't tell a real number from the right one.
-2. **Pfizer's remaining Upjohn spin-off cost: $700 million (expected $77.78 million).**
+1. **Pfizer's remaining Upjohn spin-off cost: $700 million (expected $77.78 million).**
    Retrieval returned the 2021 10-K instead of the 2023 10-Q, and the model quoted the total
    cost rather than what was left to pay. The 10-Q says about 90% of $700 million has been
    spent, which leaves $70 million, so the expected answer looks wrong too.
-3. **Boeing's segments over 20% of revenue: correct, but blocked.** The model computed each
-   segment's share right (38.83%, 34.77%, 26.44%), then wrote "each exceeding 20%". The 20
-   came from the question, and figures from the question aren't evidence, so the whole
+2. **MGM's 3-year average capex as a % of revenue: correct (7.9%), but blocked.** Python
+   worked out each year's share and the average, then the model wrote "The 3-year average".
+   The 3 came from the question, and figures from the question aren't evidence, so the whole
    answer was refused.
+3. **Walmart's 3-year average EBITDA margin: correct (6.2%), but blocked.** The model added
+   operating income and D&A for each year itself and passed the sums (like 31,555) to Python
+   as if they were on a page. They weren't, so the check refused it: the model may not do
+   arithmetic, even when it gets it right.

@@ -28,9 +28,9 @@ PLACEHOLDER = re.compile(r"\{c(\d+)\}")
 # A placeholder plus any "%" the model wrote after it: Python decides whether a result is
 # a percentage, so a ratio of 0.103 is never shown as "0.103%".
 PLACEHOLDER_IN_ANSWER = re.compile(r"\{c(\d+)\}(?:\s?%|\s+percent\b)?")
-# Unit conversions may be calculation inputs: they change a traced figure's scale but
-# can't invent its digits, and they show in the working.
-UNIT_FACTORS = {100, 1000, 1000000}
+# Unit conversions (times or divided by 1,000 and so on) may be calculation inputs: they
+# change a traced figure's scale but can't invent its digits, and they show in the working.
+UNIT_FACTORS = {Decimal(f) for f in (100, 1000, 1000000, "0.01", "0.001", "0.000001")}
 
 
 class Citation(BaseModel):
@@ -71,7 +71,9 @@ def earlier_result(value: str, shown: list[CalculationResult]) -> int | None:
     return next((i for i, c in enumerate(shown, 1) if parse(c.result) == parse(value)), None)
 
 
-def run_calculations(calculations: list[Calculation]) -> list[CalculationResult] | None:
+def run_calculations(
+    calculations: list[Calculation], round_to: int | None
+) -> list[CalculationResult] | None:
     """Do the model's calculations in order, or return None if one can't be done.
 
     An input that refers to an earlier result uses its exact value, not the rounded one shown.
@@ -95,7 +97,7 @@ def run_calculations(calculations: list[Calculation]) -> list[CalculationResult]
         if result is None:
             return None
         # Averages, sums and differences of percentages are percentages too.
-        percent = calc.operation in ("percent_change", "percentage") or (
+        percent = calc.operation in ("percent_change", "cagr", "percentage") or (
             calc.operation in ("average", "sum", "difference") and all(p for _, p in inputs)
         )
         results.append((result, percent))
@@ -103,7 +105,12 @@ def run_calculations(calculations: list[Calculation]) -> list[CalculationResult]
             CalculationResult(
                 operation=calc.operation,
                 inputs=written,
-                result=format_result(result, percent, int(os.environ["CALC_DECIMALS"])),
+                result=format_result(
+                    result,
+                    percent,
+                    int(os.environ["CALC_DECIMALS"]) if round_to is None else round_to,
+                    exact=round_to is not None,
+                ),
             )
         )
     return shown
@@ -127,25 +134,19 @@ def respond(
     if not reply.answer.strip() or not reply.cited_excerpts:
         return refuse("malformed_reply")
 
-    # Excerpt 0 is the question itself: calculation inputs like 365 in a formula it defines.
-    cited = list(dict.fromkeys(reply.cited_excerpts))  # keep order, drop repeats
-    used = reply.numbers + [n for calc in reply.calculations for n in calc.inputs]
-    if not set(cited) <= set(range(1, len(passages) + 1)) or any(
-        n.excerpt not in {0, *cited} for n in used
-    ):
-        return refuse("invalid_citation")
-
     # The numbers on each page. The excerpt label (company, year) counts too: "3M", "2018".
+    # Excerpt 0 is the question itself: calculation inputs like 365 in a formula it defines.
     on_page = {
         i: values_in(f"{p.company} {p.content}") | {p.doc_period} for i, p in enumerate(passages, 1)
     }
     on_page[0] = values_in(question)
 
+    used = reply.numbers + [n for calc in reply.calculations for n in calc.inputs]
     copied = [n for n in used if not PLACEHOLDER.fullmatch(n.value.strip())]
     if any(parse(n.value) is None for n in copied):
         return refuse("malformed_reply")
 
-    calculations = run_calculations(reply.calculations)
+    calculations = run_calculations(reply.calculations, reply.round_to)
     if calculations is None:
         return refuse("malformed_reply")
     # A result nothing uses means the model lost track of which result is which. The answer
@@ -157,17 +158,27 @@ def respond(
     if used_results != set(range(1, len(calculations) + 1)):
         return refuse("malformed_reply")
 
-    # Copied numbers must be on their page, unless Python worked them out.
+    # Numbers from a page must name a cited excerpt and be on it. Unit factors, the question's
+    # own numbers and copies of results come from no page.
     results = set().union(*(values_in(c.result) for c in calculations))
-    if verify_numbers and any(
-        abs(parse(n.value)) not in on_page[n.excerpt] | UNIT_FACTORS | results for n in copied
+    traceable = on_page[0] | UNIT_FACTORS | results
+    cited = list(dict.fromkeys(reply.cited_excerpts))  # keep order, drop repeats
+    from_pages = [n for n in copied if abs(parse(n.value)) not in traceable]
+    if not set(cited) <= set(range(1, len(passages) + 1)) or any(
+        n.excerpt not in cited for n in from_pages
     ):
+        return refuse("invalid_citation")
+
+    if verify_numbers and any(abs(parse(n.value)) not in on_page[n.excerpt] for n in from_pages):
         return refuse("unverified_number")
 
-    # The answer text may show numbers from cited pages, calculation results and the
-    # question's years, but not other figures from the question: a leading question's
-    # number isn't evidence.
-    allowed = set().union(*(on_page[i] for i in cited), years_in(question)) | results
+    # The answer text may show numbers from cited pages, the calculations and the question's
+    # years, but not other figures from the question: a leading question's number isn't
+    # evidence.
+    inputs = {
+        abs(parse(n.value)) for calc in reply.calculations for n in calc.inputs if n in copied
+    }
+    allowed = set().union(*(on_page[i] for i in cited), years_in(question), inputs) | results
     if verify_numbers and not in_answer <= allowed:
         return refuse("unverified_number")
 

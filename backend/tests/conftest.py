@@ -43,6 +43,7 @@ def reply(
     numbers: list[tuple[str, int]] = (),
     calculations: list[tuple[str, list[tuple[str, int]]]] = (),
     status: str = "answered",
+    round_to: int | None = None,
 ) -> str:
     """The JSON a model would return, built from short tuples."""
     return json.dumps(
@@ -55,5 +56,6 @@ def reply(
                 {"operation": op, "inputs": [{"value": v, "excerpt": e} for v, e in inputs]}
                 for op, inputs in calculations
             ],
+            "round_to": round_to,
         }
     )

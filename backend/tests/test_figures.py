@@ -38,6 +38,7 @@ def test_parse(text, value):
         ("percent_change", [D(100), D(110)], D(10)),
         # Outflows shown in parentheses: (100) -> (110) is still 10% growth.
         ("percent_change", [D(-100), D(-110)], D(10)),
+        ("cagr", [D(100), D(121), D(2)], D(10)),
         ("ratio", [D(1), D(0)], None),
         ("sum", [D(1)], None),
     ],

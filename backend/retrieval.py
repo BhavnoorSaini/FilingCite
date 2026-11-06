@@ -1,6 +1,6 @@
 """Find the chunks most likely to answer a question.
 
-1. If the question names a loaded company (and a year), search only those filings.
+1. If the question names a loaded company or its ticker (and a year), search only those filings.
 2. If it names a financial statement, or a line item that lives on one ("inventory" is on
    the balance sheet, "COGS" on the income statement, "capex" on the cash flow statement),
    put that statement's tables first: these big tables rarely rank well.
@@ -8,9 +8,11 @@
 4. Keep as many passages as fit the token budget, best first.
 """
 
+import json
 import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 import psycopg
 
@@ -33,11 +35,12 @@ class Passage:
 @dataclass(frozen=True)
 class Statement:
     title: str  # how the statement is titled on its page
-    line_items: list[str]  # all of these appear in the statement's own table
+    line_items: list[str]  # all of these appear in the table on the statement's first page
     asked_as: list[str]  # other words in a question that mean this statement is needed
 
     def is_asked(self, question: str) -> bool:
-        return bool(re.search("|".join([self.title, *self.asked_as]), question, re.IGNORECASE))
+        words = "|".join([self.title, *self.asked_as])
+        return bool(re.search(rf"\b(?:{words})", question, re.IGNORECASE))
 
 
 # Patterns work in both Python and Postgres.
@@ -50,6 +53,7 @@ STATEMENTS = [
             "(?:current|total) liabilities",
             "current assets",
             "working capital",
+            "(?:quick|current) ratio",
             "accounts (?:payable|receivable)",
             "inventor(?:y|ies)",
             "property, plant",
@@ -80,7 +84,7 @@ STATEMENTS = [
     ),
     Statement(  # cash flow statement
         title=r"statements? of (?:consolidated )?cash flows?",
-        line_items=["operating activities", "investing activities", "financing activities"],
+        line_items=["operating activities", "investing activities"],  # financing may be overleaf
         asked_as=[
             "cash flows?",
             "capital expenditures?",
@@ -92,6 +96,9 @@ STATEMENTS = [
         ],
     ),
 ]
+
+# Each company's official ticker, so "JPM" or "JnJ" finds JPMorgan or Johnson & Johnson.
+TICKERS = json.loads((Path(__file__).parent / "tickers.json").read_text())
 
 YEAR = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")  # also inside "FY2018"
 
@@ -108,12 +115,15 @@ def years_in(question: str) -> set[int]:
 def filings_named(conn: psycopg.Connection, question: str) -> list[int] | None:
     """Filing ids for the companies (and years) the question names, or None to search everything."""
     asked = f" {normalize(question)} "
+    # Tickers count only when written with capitals, so "cost" isn't Costco (COST).
+    words = re.findall(r"[A-Za-z]+", question)
+    tickers = {w.upper() for w in words if sum(c.isupper() for c in w) >= 2}
     named = [
         (filing_id, period)
         for filing_id, company, period in conn.execute(
             "SELECT id, company, doc_period FROM filings"
         )
-        if f" {normalize(company)} " in asked
+        if f" {normalize(company)} " in asked or TICKERS.get(company) in tickers
     ]
     if not named:
         return None

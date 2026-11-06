@@ -98,6 +98,32 @@ def test_result_written_out_in_the_answer_counts_as_used():
     assert r.answered
 
 
+def test_rounding_the_question_asks_for():
+    r = respond(
+        reply(
+            "Gross margin was {c1}.",
+            calculations=[("percentage", [("139,156", 1), ("232,887", 1)])],
+            round_to=1,
+        ),
+        PASSAGES,
+        "What was Amazon's FY2018 gross margin? Round to one decimal place.",
+    )
+    assert r.answer == "Gross margin was 59.8%."
+
+
+def test_number_from_the_question_under_another_excerpt():
+    question = "What is Amazon's 2 year growth rate?"
+    r = respond(
+        reply(
+            "Over 2 years it grew {c1} a year.",
+            calculations=[("cagr", [("111,934", 1), ("139,156", 1), ("2", 1)])],
+        ),
+        PASSAGES,
+        question,
+    )
+    assert r.answer == "Over 2 years it grew 11.50% a year."
+
+
 def test_ratio_never_shown_as_a_percentage():
     r = respond(
         reply("The ratio was {c1}%.", calculations=[("ratio", [("139,156", 1), ("232,887", 1)])]),
@@ -110,6 +136,15 @@ def test_ratio_never_shown_as_a_percentage():
 def test_unit_conversion_is_allowed():
     r = respond(
         reply("That is ${c1} billion.", calculations=[("ratio", [("139,156", 1), ("1,000", 1)])]),
+        PASSAGES,
+        QUESTION,
+    )
+    assert r.answer == "That is $139.16 billion."
+
+
+def test_unit_conversion_by_multiplying():
+    r = respond(
+        reply("That is ${c1} billion.", calculations=[("product", [("139,156", 1), ("0.001", 1)])]),
         PASSAGES,
         QUESTION,
     )

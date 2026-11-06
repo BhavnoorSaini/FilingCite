@@ -38,6 +38,7 @@ class Reply(Strict):
     cited_excerpts: list[int]
     numbers: list[UsedNumber]
     calculations: list[Calculation]
+    round_to: int | None  # decimal places the question asks for
 
 
 INSTRUCTIONS = """You answer questions about SEC filings using ONLY the numbered excerpts below.
@@ -52,6 +53,8 @@ and leave answer empty and all lists empty.
 - Never do arithmetic yourself. If the answer needs a calculation, add it to calculations \
 with one of these operations and its inputs copied from the excerpts:
   percent_change: inputs [old, new]
+  cagr: inputs [start, end, years], giving compound annual growth as a percent; years \
+may be a difference of two years
   percentage: inputs [part, whole], giving part / whole as a percent; use it for any \
 margin or "as a %" figure
   ratio: inputs [numerator, denominator], for plain ratios such as a current ratio
@@ -67,6 +70,8 @@ number the question itself gives (e.g. 365 in a formula it defines); or 1,000 or
 two tables use different units, convert one first. If the question asks for a different \
 unit than the excerpt's, give the figure with the excerpt's unit (e.g. "$45,210 \
 thousand") or convert it with a calculation.
+- Set round_to to the decimal places the question asks for (1 for "round to one decimal \
+place"), or null if it doesn't ask. Python does the rounding.
 - Write {c1} in the answer where the first calculation's result goes, {c2} for the \
 second, and so on. Every result must be used, in the answer or in a later calculation. \
 Percentages come with "%"; write any other unit yourself (e.g. "${c1} million").

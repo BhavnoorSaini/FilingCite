@@ -1,8 +1,6 @@
 """Run FilingCite on the eval questions, saving one result per question as it goes.
 
-Usage (from backend/):
-    uv run --env-file ../.env python -m evals.run --set subset40 --name subset40
-    uv run --env-file ../.env python -m evals.run --set full --name full
+Usage (from backend/):  uv run --env-file ../.env python -m evals.run --name full
 
 Re-running with the same --name resumes, e.g. after the API's daily limit stops a run.
 The model is called even below MIN_SIMILARITY so evals.score can try other thresholds,
@@ -27,10 +25,9 @@ def read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in lines if line.strip()]
 
 
-def load_questions(which: str) -> list[dict]:
-    """FinanceBench questions (all, or the fixed 40) plus the should-refuse questions."""
+def load_questions() -> list[dict]:
+    """The FinanceBench questions plus the should-refuse questions."""
     financebench = Path(os.environ["FINANCEBENCH_DIR"]) / "data/financebench_open_source.jsonl"
-    subset = set((HERE / "subset40.txt").read_text().split()) if which == "subset40" else None
     questions = [
         {
             "id": q["financebench_id"],
@@ -40,7 +37,6 @@ def load_questions(which: str) -> list[dict]:
             "evidence": [[e["doc_name"], e["evidence_page_num"] + 1] for e in q["evidence"]],
         }
         for q in read_jsonl(financebench)
-        if subset is None or q["financebench_id"] in subset
     ]
     refusals = read_jsonl(HERE / "refusal_questions.jsonl")
     return questions + [{**q, "expected": None, "evidence": []} for q in refusals]
@@ -48,14 +44,13 @@ def load_questions(which: str) -> list[dict]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--set", choices=["subset40", "full"], required=True)
     parser.add_argument("--name", required=True, help="results go to evals/results/<name>.jsonl")
     parser.add_argument("--limit", type=int, help="stop after this many new questions")
     args = parser.parse_args()
 
     path = HERE / "results" / f"{args.name}.jsonl"
     done = {r["id"] for r in read_jsonl(path)}
-    todo = [q for q in load_questions(args.set) if q["id"] not in done][: args.limit]
+    todo = [q for q in load_questions() if q["id"] not in done][: args.limit]
     print(f"{len(done)} done, {len(todo)} to go -> {path}", flush=True)
 
     model = chat_model()

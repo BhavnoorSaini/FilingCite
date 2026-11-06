@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Literal
 
 Operation = Literal[
-    "percent_change", "percentage", "ratio", "difference", "sum", "average", "product"
+    "percent_change", "cagr", "percentage", "ratio", "difference", "sum", "average", "product"
 ]
 
 # Labels, not figures: document names ("10-K") and quarters or halves ("Q2", "2Q", "H1").
@@ -45,7 +45,7 @@ def calculate(operation: Operation, inputs: list[Decimal]) -> Decimal | None:
     if operation in ("sum", "average", "product"):
         if len(inputs) < 2:
             return None
-    elif len(inputs) != 2:
+    elif len(inputs) != (3 if operation == "cagr" else 2):
         return None
 
     match operation:
@@ -71,17 +71,23 @@ def calculate(operation: Operation, inputs: list[Decimal]) -> Decimal | None:
                 # Same sign: change in size, so capex going (1,373) -> (1,577) is growth.
                 old, new = abs(old), abs(new)
             return (new - old) / abs(old) * 100
+        case "cagr":
+            start, end, years = inputs
+            if start <= 0 or end <= 0 or years <= 0:
+                return None
+            return ((end / start) ** (1 / years) - 1) * 100
     return None
 
 
-def format_result(result: Decimal, percent: bool, decimals: int) -> str:
-    """Show a result with `decimals` places, but at least 3 significant digits (0.103, not 0.10).
+def format_result(result: Decimal, percent: bool, decimals: int, exact: bool = False) -> str:
+    """Show a result with `decimals` places; percentages end in "%".
 
-    Whole results (e.g. a sum of whole numbers) have no decimals; percentages end in "%".
+    Whole results have no decimals. Unless `exact` (the question asked for that rounding),
+    small results keep at least 3 significant digits (0.103, not 0.10).
     """
     whole = result == result.to_integral_value()
     places = 0 if whole else decimals
-    while not whole and abs(result) < Decimal(10) ** (2 - places):
+    while not exact and not whole and abs(result) < Decimal(10) ** (2 - places):
         places += 1
     text = f"{result:,.{places}f}"
     return f"{text}%" if percent else text

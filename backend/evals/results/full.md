@@ -4,31 +4,31 @@
 
 | Metric | Result |
 | --- | --- |
-| Found the right page | 94/150 (63%) |
-| Answered correctly (numeric, within 1%) | 43/54 (80%) |
+| Found the right page | 102/150 (68%) |
+| Answered correctly (numeric, within 1%) | 44/54 (81%) |
 | Refused correctly | 15/15 (100%) |
-| Blocked a number | 2 |
+| Blocked a number | 6 |
 
 ## Number check off vs on
 
 | | Off | On |
 | --- | --- | --- |
-| FinanceBench answered | 100 | 98 |
-| Numeric answers correct | 43 | 43 |
-| Numeric answers wrong | 4 | 4 |
+| FinanceBench answered | 108 | 102 |
+| Numeric answers correct | 46 | 44 |
+| Numeric answers wrong | 2 | 2 |
 
 ## Refusal threshold sweep
 
 | MIN_SIMILARITY | FinanceBench answered | Numeric correct | Refused correctly |
 | --- | --- | --- | --- |
-| 0.6 | 98 | 43 | 15/15 |
-| 0.62 | 98 | 43 | 15/15 |
-| 0.64 | 98 | 43 | 15/15 |
-| 0.66 | 98 | 43 | 15/15 |
-| 0.68 | 96 | 43 | 15/15 |
-| 0.7 | 93 | 43 | 15/15 |
-| 0.72 | 90 | 42 | 15/15 |
-| 0.74 | 82 | 40 | 15/15 |
-| 0.76 | 57 | 27 | 15/15 |
-| 0.78 | 31 | 10 | 15/15 |
+| 0.6 | 102 | 44 | 15/15 |
+| 0.62 | 102 | 44 | 15/15 |
+| 0.64 | 102 | 44 | 15/15 |
+| 0.66 | 102 | 44 | 15/15 |
+| 0.68 | 100 | 44 | 15/15 |
+| 0.7 | 96 | 44 | 15/15 |
+| 0.72 | 92 | 42 | 15/15 |
+| 0.74 | 83 | 40 | 15/15 |
+| 0.76 | 62 | 30 | 15/15 |
+| 0.78 | 33 | 9 | 15/15 |
 | 0.8 | 17 | 4 | 15/15 |

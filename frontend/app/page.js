@@ -17,6 +17,7 @@ const SIGNS = { ratio: "÷", percentage: "÷", difference: "−", sum: "+", prod
 function describe({ operation, inputs, result }) {
   const values = inputs.map((v) => v.replace(/^\{c(\d+)\}$/, "result $1"));
   if (operation === "percent_change") return `Change from ${values[0]} to ${values[1]} = ${result}`;
+  if (operation === "cagr") return `Yearly growth from ${values[0]} to ${values[1]} over ${values[2]} years = ${result}`;
   if (operation === "average") return `Average of ${values.join(", ")} = ${result}`;
   const times100 = operation === "percentage" ? " × 100" : "";
   return `${values.join(` ${SIGNS[operation]} `)}${times100} = ${result}`;
