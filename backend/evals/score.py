@@ -1,14 +1,13 @@
-"""Grade saved eval results and print the scorecard. Python grades; no AI judges answers.
+"""Grade saved eval results and write the scorecard. Python grades; no AI judges.
 
 Usage (from backend/):  uv run --env-file ../.env python -m evals.score --name full
 
-- Found the right page: a FinanceBench evidence page is among the retrieved chunks.
-- Answered correctly: for FinanceBench answers that are a short number ("$1577.00", "65.4%"),
-  the answer contains a number within 1% of it, ignoring sign, ratio vs percentage and
-  thousands vs millions. Written answers need judgement, so they aren't marked right or
-  wrong.
-- Refused correctly: a should-refuse question was not answered.
-- Blocked a number: the number check refused an answer the model had written.
+- Found the right page: an evidence page is among the retrieved chunks.
+- Answered correctly: for short numeric answers ("$1577.00", "65.4%"), the answer has a
+  number within 1% of it, ignoring sign and scale (ratio vs percent, thousands vs millions).
+  Written answers need a person to judge, so they aren't graded.
+- Refused correctly: a should-refuse question wasn't answered.
+- Blocked a number: the number check refused an answer the model wrote.
 """
 
 import argparse

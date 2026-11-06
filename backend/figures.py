@@ -1,8 +1,7 @@
-"""Find numbers in text and do the only arithmetic FilingCite allows.
+"""Find numbers in text, and do the only math FilingCite allows.
 
-Matching ignores formatting ("$ 1,577", "(1,577)", "1577" are the same value),
-sign (filings show outflows in parentheses) and units. Digits must match exactly:
-"1.6" never matches "1,577".
+Matching ignores formatting, sign and units ("$ 1,577", "(1,577)" and "1577" are the same),
+but the digits must match exactly.
 """
 
 import math
@@ -14,12 +13,12 @@ Operation = Literal[
     "percent_change", "cagr", "percentage", "ratio", "difference", "sum", "average", "product"
 ]
 
-# Labels, not figures: document names ("10-K") and quarters or halves ("Q2", "2Q", "H1").
+# Labels, not figures: "10-K", "Q2", "2Q", "H1".
 LABELS = re.compile(r"\b(?:10-K|10-Q|8-K|Q[1-4]|[1-4]Q|H[12])\b", re.IGNORECASE)
-# "FY22" and "2Q23" / "Q2'23" mean 2022 and 2023, so they are checked as those years.
+# "FY22", "2Q23" and "Q2'23" are read as full years.
 SHORT_FISCAL_YEAR = re.compile(r"\b(?:FY|Q[1-4]|[1-4]Q)\s?'?(\d{2})\b", re.IGNORECASE)
 NUMBER = re.compile(r"\d+(?:,\d{3})*(?:\.\d+)?")
-# Models often write Unicode hyphens and minus signs ("10\u2011K", "\u22123.2"); read them as "-".
+# Models often write Unicode dashes and minus signs; treat them as "-".
 DASHES = str.maketrans(dict.fromkeys("\u2010\u2011\u2012\u2013\u2014\u2015\u2212", "-"))
 
 
@@ -66,10 +65,10 @@ def calculate(operation: Operation, inputs: list[Decimal]) -> Decimal | None:
 
 
 def format_result(result: Decimal, percent: bool, decimals: int, exact: bool = False) -> str:
-    """Show a result with `decimals` places; percentages end in "%".
+    """Format a result to `decimals` places, with "%" for percentages.
 
-    Whole results have no decimals. Unless `exact` (the question asked for that rounding),
-    small results keep at least 3 significant digits (0.103, not 0.10).
+    Whole numbers get no decimals. Unless `exact` (the question asked for this rounding),
+    small results keep 3 significant digits (0.103, not 0.10).
     """
     if result == result.to_integral_value():
         places = 0

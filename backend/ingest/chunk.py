@@ -1,7 +1,6 @@
-"""Split a DoclingDocument into chunks of about `max_words` words.
+"""Split a Docling document into chunks of about `max_words` words.
 
-Rules: a chunk never spans two pages, and each table is one whole chunk.
-Page headers and footers are left out (Docling puts them outside the body).
+A chunk never spans two pages, tables stay whole, and page headers and footers are left out.
 """
 
 import re
@@ -32,7 +31,7 @@ def chunk_document(doc: DoclingDocument, max_words: int) -> list[Chunk]:
     buffer: list[str] = []
     buffer_words = 0
     buffer_page = 0
-    heading = ""  # latest section heading, used to label tables
+    heading = ""  # latest heading, used to title tables
 
     def add_chunk(page: int, content: str, is_table: bool = False) -> None:
         index = next_index.get(page, 0)
@@ -50,14 +49,14 @@ def chunk_document(doc: DoclingDocument, max_words: int) -> list[Chunk]:
             continue
 
         if isinstance(item, TableItem):
-            # Skip the table of contents: it matches many queries but answers none.
+            # Skip the table of contents: it matches many questions and answers none.
             if item.label == DocItemLabel.DOCUMENT_INDEX:
                 continue
             table = compact_table(item.export_to_markdown(doc=doc))
             if table:
                 close_chunk()
                 title = item.caption_text(doc) or heading
-                page = item.prov[0].page_no  # a table stays whole, cited to its first page
+                page = item.prov[0].page_no  # cited to the page the table starts on
                 add_chunk(page, f"{title}\n{table}" if title else table, is_table=True)
             continue
 
@@ -74,7 +73,7 @@ def chunk_document(doc: DoclingDocument, max_words: int) -> list[Chunk]:
                 close_chunk()
                 buffer_page = page
 
-            # Split paragraphs longer than a whole chunk.
+            # Split paragraphs longer than a chunk.
             for start in range(0, len(words), max_words):
                 piece = words[start : start + max_words]
                 if buffer_words + len(piece) > max_words:
@@ -87,7 +86,7 @@ def chunk_document(doc: DoclingDocument, max_words: int) -> list[Chunk]:
 
 
 def page_parts(item: TextItem) -> list[tuple[int, str]]:
-    """Split a text item that runs across pages into (page, text) parts, using Docling's charspans."""
+    """Split text that runs across pages into (page, text) parts."""
     if len({p.page_no for p in item.prov}) == 1:
         return [(item.prov[0].page_no, item.text)]
     return [(p.page_no, item.text[p.charspan[0] : p.charspan[1]]) for p in item.prov]

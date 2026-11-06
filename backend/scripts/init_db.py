@@ -13,7 +13,7 @@ SCHEMA = Path(__file__).resolve().parent.parent / "schema.sql"
 
 def main() -> None:
     sql = SCHEMA.read_text().replace("{embedding_dim}", str(int(os.environ["EMBEDDING_DIM"])))
-    # Plain psycopg connection: the vector type doesn't exist until this runs.
+    # A plain connection: the vector type doesn't exist yet.
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
         conn.execute(sql)
     print("Schema applied.")

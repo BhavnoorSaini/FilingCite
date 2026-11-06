@@ -1,11 +1,10 @@
 """Find the chunks most likely to answer a question.
 
-1. If the question names a loaded company or its ticker (and a year), search only those filings.
-2. If it names a financial statement, or a line item that lives on one ("inventory" is on
-   the balance sheet, "COGS" on the income statement, "capex" on the cash flow statement),
-   put that statement's tables first: these big tables rarely rank well.
+1. If the question names a company (or its ticker) and a year, search only those filings.
+2. If it needs a financial statement ("inventory" is on the balance sheet, "capex" on the
+   cash flow statement), put that statement's table first: big tables rarely rank well.
 3. Add the chunks closest in meaning.
-4. Keep as many passages as fit the token budget, best first.
+4. Keep as many as fit the token budget, best first.
 """
 
 import json
@@ -29,14 +28,14 @@ class Passage:
     doc_link: str | None
     page: int
     content: str
-    similarity: float  # cosine similarity between the question and the chunk
+    similarity: float  # cosine similarity to the question
 
 
 @dataclass(frozen=True)
 class Statement:
-    title: str  # how the statement is titled on its page
-    line_items: list[str]  # all of these appear in the table on the statement's first page
-    asked_as: list[str]  # other words in a question that mean this statement is needed
+    title: str  # the title on the statement's page
+    line_items: list[str]  # all appear in the table on its first page
+    asked_as: list[str]  # other question wording that needs this statement
 
     def is_asked(self, question: str) -> bool:
         words = "|".join([self.title, *self.asked_as])
@@ -97,7 +96,7 @@ STATEMENTS = [
     ),
 ]
 
-# Each company's official ticker, so "JPM" or "JnJ" finds JPMorgan or Johnson & Johnson.
+# Official tickers, so "JPM" or "JnJ" finds the right company.
 TICKERS = json.loads((Path(__file__).parent / "tickers.json").read_text())
 
 YEAR = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")  # also inside "FY2018"
@@ -113,7 +112,7 @@ def years_in(question: str) -> set[int]:
 
 
 def filings_named(conn: psycopg.Connection, question: str) -> list[int] | None:
-    """Filing ids for the companies (and years) the question names, or None to search everything."""
+    """Filing ids for the companies (and years) in the question, or None to search everything."""
     asked = f" {normalize(question)} "
     # Tickers count only when written with capitals, so "cost" isn't Costco (COST).
     words = re.findall(r"[A-Za-z]+", question)
@@ -134,11 +133,10 @@ def filings_named(conn: psycopg.Connection, question: str) -> list[int] | None:
 
 
 def statement_tables(conn: psycopg.Connection, question: str, filings: list[int]) -> list[int]:
-    """The tables of each financial statement the question needs, one page per statement.
+    """The table of each financial statement the question needs, one page per statement.
 
-    A statement page has the statement's title and a table with all its typical line items.
-    Among matches, prefer the filing closest to the year asked (the later one on ties, since
-    it covers both years), then the earliest page: primary statements come before the notes.
+    Prefer the filing nearest the year asked (the later one on ties, since it covers both
+    years), then the earliest page: the statements come before the notes.
     """
     years = years_in(question)
 
@@ -173,7 +171,7 @@ def search(conn: psycopg.Connection, question: str, k: int) -> list[Passage]:
     vector = embed_query(question)
     filings = filings_named(conn, question)
     statements = statement_tables(conn, question, filings) if filings else []
-    # Exact nearest neighbours (no approximate index): fast enough at this size.
+    # Exact search, no index: fast enough at this size.
     nearest = conn.execute(
         """
         SELECT id FROM chunks
@@ -188,9 +186,9 @@ def search(conn: psycopg.Connection, question: str, k: int) -> list[Passage]:
 
 
 def within_budget(passages: list[Passage], budget: int) -> list[Passage]:
-    """Keep passages in rank order while their text fits the token budget (about 4 chars a token).
+    """Keep passages, best first, while they fit the token budget (about 4 characters a token).
 
-    The free Groq tier allows 8K tokens a minute, so one oversized prompt would be rejected.
+    Groq's free tier allows 8K tokens a minute, so an oversized prompt would be rejected.
     """
     kept: list[Passage] = []
     used = 0

@@ -1,10 +1,10 @@
-"""Parse, chunk, embed and load FinanceBench filings into Neon. Mac only; never deployed.
+"""Parse, chunk, embed and load the FinanceBench filings into Neon. Runs on a Mac; never deployed.
 
 Usage (from backend/):  uv run --group ingest --env-file ../.env python -m ingest.load
 
-Loads every filing a FinanceBench question uses, skipping filings already loaded, so an
-interrupted run picks up where it stopped. Docling's output is cached as JSON. A filing and
-its chunks are written in one transaction, so re-running never creates duplicates.
+Skips filings already loaded, so an interrupted run picks up where it stopped. Docling's
+output is cached as JSON, and each filing is saved in one transaction, so there are no
+duplicates.
 """
 
 import json
@@ -36,7 +36,7 @@ def parse(pdf: Path, cache_dir: Path, converter: DocumentConverter) -> DoclingDo
 
 
 def save(meta: dict, chunks, embeddings) -> None:
-    # A fresh connection per filing: Neon suspends idle computes while a long PDF parses.
+    # A fresh connection per filing: Neon sleeps while a long PDF parses.
     with connect() as conn, conn.transaction():
         filing_id = conn.execute(
             "INSERT INTO filings (doc_name, company, doc_type, doc_period, doc_link)"

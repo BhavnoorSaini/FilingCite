@@ -13,7 +13,7 @@ const EXAMPLES = [
 
 const SIGNS = { ratio: "÷", percentage: "÷", difference: "−", sum: "+", product: "×" };
 
-// How Python worked out a result; "{c1}" as an input means the result of step 1.
+// How Python got a result. "{c1}" means the result of step 1.
 function describe({ operation, inputs, result }) {
   const values = inputs.map((v) => v.replace(/^\{c(\d+)\}$/, "result $1"));
   if (operation === "percent_change") return `Change from ${values[0]} to ${values[1]} = ${result}`;
@@ -38,7 +38,8 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: text.trim() }),
       });
-      setResult(response.ok ? await response.json() : { error: true });
+      if (response.status === 429) setResult({ busy: true });
+      else setResult(response.ok ? await response.json() : { error: true });
     } catch {
       setResult({ error: true });
     }
@@ -89,6 +90,9 @@ export default function Home() {
 }
 
 function Result({ result }) {
+  if (result.busy) {
+    return <p className="card">Busy, try again in a minute.</p>;
+  }
   if (result.error) {
     return <p className="card">Something went wrong. Try again in a minute.</p>;
   }

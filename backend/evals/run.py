@@ -1,10 +1,10 @@
-"""Run FilingCite on the eval questions, saving one result per question as it goes.
+"""Run every eval question, saving each result as it goes.
 
 Usage (from backend/):  uv run --env-file ../.env python -m evals.run --name full
 
-Re-running with the same --name resumes, e.g. after the API's daily limit stops a run.
-The model is called even below MIN_SIMILARITY so evals.score can try other thresholds,
-and each reply is checked with the number check on and off.
+Re-running with the same --name picks up where it stopped. Each reply is checked with the
+number check on and off, and the model is called even for weak matches so evals.score can
+try other thresholds.
 """
 
 import argparse
@@ -57,7 +57,7 @@ def main() -> None:
     path.parent.mkdir(exist_ok=True)
     with path.open("a") as out:
         for i, q in enumerate(todo, 1):
-            with connect() as conn:  # a fresh connection each time: Neon suspends idle computes
+            with connect() as conn:  # a fresh connection each time: Neon sleeps when idle
                 passages = search(conn, q["question"], int(os.environ["RETRIEVAL_TOP_K"]))
             raw = model(build_prompt(q["question"], passages))
             result = {

@@ -1,7 +1,6 @@
-"""The answer-writing model: reply schema, prompt and the API call.
+"""The model's reply format, its prompt and the API call.
 
-The model only writes and cites. It never does arithmetic or decides whether an answer
-is correct; Python checks its reply (see answer.py).
+The model only writes and cites; Python checks everything it says (answer.py).
 """
 
 import json
@@ -15,16 +14,16 @@ from pydantic import BaseModel, ConfigDict
 from figures import Operation
 from retrieval import Passage
 
-Model = Callable[[str], str]  # prompt -> raw reply text; tests pass a fake
+Model = Callable[[str], str]  # prompt in, raw reply out; tests pass a fake
 
 
 class Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")  # strict structured outputs need this
+    model_config = ConfigDict(extra="forbid")  # required for strict structured outputs
 
 
 class UsedNumber(Strict):
     value: str  # as written in the excerpt, e.g. "(1,577)"
-    excerpt: int  # 0 = the question itself, a unit factor or an earlier result "{c1}"
+    excerpt: int  # the excerpt it's from; 0 is the question
 
 
 class Calculation(Strict):
@@ -90,17 +89,14 @@ def build_prompt(question: str, passages: list[Passage]) -> str:
 
 
 def chat_model() -> Model:
-    """Call an OpenAI-compatible API (Groq or OpenRouter) with a strict reply schema.
-
-    Provider-specific options (reasoning effort, routing) come from LLM_EXTRA_BODY as JSON.
-    """
+    """Call an OpenAI-compatible API (Groq or OpenRouter) with a strict reply schema."""
     client = OpenAI(base_url=os.environ["LLM_BASE_URL"], api_key=os.environ["LLM_API_KEY"])
     schema = {"name": "reply", "strict": True, "schema": Reply.model_json_schema()}
 
     def call(prompt: str) -> str:
         response = client.chat.completions.create(
             model=os.environ["LLM_MODEL"],
-            # Reasoning models do best with all instructions in the user message.
+            # Reasoning models do best with everything in the user message.
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_schema", "json_schema": schema},
             max_completion_tokens=int(os.environ["LLM_MAX_COMPLETION_TOKENS"]),
