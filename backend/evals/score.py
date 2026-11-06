@@ -32,7 +32,7 @@ def grade(r: dict, mode: str, threshold: Decimal) -> dict:
     found = numbers(shown["answer"]) if shown["answered"] else []
     scales = (1, 100, Decimal("0.01"), 1000, Decimal("0.001"))
     return {
-        "refuse_set": expected is None,
+        "should_refuse": expected is None,
         "answered": shown["answered"],
         "blocked": shown["refusal"] == "unverified_number",
         "hit": any(e in r["retrieved"] for e in r["evidence"]),
@@ -48,19 +48,19 @@ def grade(r: dict, mode: str, threshold: Decimal) -> dict:
 
 def summarize(records: list[dict], mode: str, threshold: Decimal) -> dict:
     graded = [grade(r, mode, threshold) for r in records]
-    fb = [g for g in graded if not g["refuse_set"]]
-    numeric = [g for g in fb if g["numeric"]]
-    count = lambda gs, key: sum(g[key] for g in gs)
+    financebench = [g for g in graded if not g["should_refuse"]]
+    numeric = [g for g in financebench if g["numeric"]]
+    should_refuse = [g for g in graded if g["should_refuse"]]
     return {
-        "fb": len(fb),
-        "hit": count(fb, "hit"),
-        "answered": count(fb, "answered"),
+        "questions": len(financebench),
+        "hit": sum(g["hit"] for g in financebench),
+        "answered": sum(g["answered"] for g in financebench),
         "numeric": len(numeric),
-        "numeric_answered": count(numeric, "answered"),
-        "correct": count(numeric, "correct"),
-        "refuse": len(graded) - len(fb),
-        "refused": sum(not g["answered"] for g in graded if g["refuse_set"]),
-        "blocked": count(graded, "blocked"),
+        "correct": sum(g["correct"] for g in numeric),
+        "wrong": sum(g["answered"] and not g["correct"] for g in numeric),
+        "should_refuse": len(should_refuse),
+        "refused": sum(not g["answered"] for g in should_refuse),
+        "blocked": sum(g["blocked"] for g in graded),
     }
 
 
@@ -74,15 +74,15 @@ def scorecard(records: list[dict], threshold: Decimal, name: str) -> str:
         f"# FilingCite scorecard: {name}",
         "",
         (
-            f"{on['fb']} FinanceBench + {on['refuse']} should-refuse questions, "
+            f"{on['questions']} FinanceBench + {on['should_refuse']} should-refuse questions, "
             f"MIN_SIMILARITY {threshold}, {os.environ['LLM_MODEL']}."
         ),
         "",
         "| Metric | Result |",
         "| --- | --- |",
-        f"| Found the right page | {pct(on['hit'], on['fb'])} |",
+        f"| Found the right page | {pct(on['hit'], on['questions'])} |",
         f"| Answered correctly (numeric, within 1%) | {pct(on['correct'], on['numeric'])} |",
-        f"| Refused correctly | {pct(on['refused'], on['refuse'])} |",
+        f"| Refused correctly | {pct(on['refused'], on['should_refuse'])} |",
         f"| Blocked a number | {on['blocked']} |",
         "",
         "## Number check off vs on",
@@ -91,10 +91,7 @@ def scorecard(records: list[dict], threshold: Decimal, name: str) -> str:
         "| --- | --- | --- |",
         f"| FinanceBench answered | {off['answered']} | {on['answered']} |",
         f"| Numeric answers correct | {off['correct']} | {on['correct']} |",
-        (
-            f"| Numeric answers wrong | {off['numeric_answered'] - off['correct']} "
-            f"| {on['numeric_answered'] - on['correct']} |"
-        ),
+        f"| Numeric answers wrong | {off['wrong']} | {on['wrong']} |",
         "",
         "## Refusal threshold sweep",
         "",
@@ -103,7 +100,8 @@ def scorecard(records: list[dict], threshold: Decimal, name: str) -> str:
     ]
     for t in (Decimal(t) / 100 for t in range(60, 81, 2)):
         s = summarize(records, "on", t)
-        lines.append(f"| {t} | {s['answered']} | {s['correct']} | {s['refused']}/{s['refuse']} |")
+        refused = f"{s['refused']}/{s['should_refuse']}"
+        lines.append(f"| {t} | {s['answered']} | {s['correct']} | {refused} |")
     return "\n".join(lines) + "\n"
 
 

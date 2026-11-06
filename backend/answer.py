@@ -78,6 +78,7 @@ def run_calculations(
 
     An input that refers to an earlier result uses its exact value, not the rounded one shown.
     """
+    decimals = int(os.environ["CALC_DECIMALS"]) if round_to is None else round_to
     results: list[tuple[Decimal, bool]] = []  # (value, is a percentage)
     shown: list[CalculationResult] = []
     for calc in calculations:
@@ -105,15 +106,22 @@ def run_calculations(
             CalculationResult(
                 operation=calc.operation,
                 inputs=written,
-                result=format_result(
-                    result,
-                    percent,
-                    int(os.environ["CALC_DECIMALS"]) if round_to is None else round_to,
-                    exact=round_to is not None,
-                ),
+                result=format_result(result, percent, decimals, exact=round_to is not None),
             )
         )
     return shown
+
+
+def all_results_used(answer: str, calculations: list[CalculationResult]) -> bool:
+    """Whether each result is in the answer (as "{c1}" or written out) or in a later input.
+
+    A result nothing uses means the model lost track of which result is which.
+    """
+    in_answer = values_in(PLACEHOLDER.sub(" ", answer))
+    used = {int(n) for n in PLACEHOLDER.findall(answer)}
+    used |= {int(n) for c in calculations for i in c.inputs for n in PLACEHOLDER.findall(i)}
+    used |= {i for i, c in enumerate(calculations, 1) if values_in(c.result) <= in_answer}
+    return used == set(range(1, len(calculations) + 1))
 
 
 def respond(
@@ -147,15 +155,7 @@ def respond(
         return refuse("malformed_reply")
 
     calculations = run_calculations(reply.calculations, reply.round_to)
-    if calculations is None:
-        return refuse("malformed_reply")
-    # A result nothing uses means the model lost track of which result is which. The answer
-    # can use a result through its placeholder or by writing it out.
-    in_answer = values_in(PLACEHOLDER.sub(" ", reply.answer))
-    used_results = {int(n) for n in PLACEHOLDER.findall(reply.answer)}
-    used_results |= {int(n) for c in calculations for i in c.inputs for n in PLACEHOLDER.findall(i)}
-    used_results |= {i for i, c in enumerate(calculations, 1) if values_in(c.result) <= in_answer}
-    if used_results != set(range(1, len(calculations) + 1)):
+    if calculations is None or not all_results_used(reply.answer, calculations):
         return refuse("malformed_reply")
 
     # Numbers from a page must name a cited excerpt and be on it. Unit factors, the question's
@@ -175,10 +175,9 @@ def respond(
     # The answer text may show numbers from cited pages, the calculations and the question's
     # years, but not other figures from the question: a leading question's number isn't
     # evidence.
-    inputs = {
-        abs(parse(n.value)) for calc in reply.calculations for n in calc.inputs if n in copied
-    }
+    inputs = {abs(parse(i)) for c in calculations for i in c.inputs if not PLACEHOLDER.match(i)}
     allowed = set().union(*(on_page[i] for i in cited), years_in(question), inputs) | results
+    in_answer = values_in(PLACEHOLDER.sub(" ", reply.answer))
     if verify_numbers and not in_answer <= allowed:
         return refuse("unverified_number")
 

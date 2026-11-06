@@ -1,5 +1,6 @@
 """The number check, citations and refusals, with a fake model."""
 
+import pytest
 from conftest import BALANCE, INCOME, PASSAGES, passage, reply
 
 import answer
@@ -133,18 +134,10 @@ def test_ratio_never_shown_as_a_percentage():
     assert r.answer == "The ratio was 0.598."
 
 
-def test_unit_conversion_is_allowed():
+@pytest.mark.parametrize("operation, factor", [("ratio", "1,000"), ("product", "0.001")])
+def test_unit_conversion_is_allowed(operation, factor):
     r = respond(
-        reply("That is ${c1} billion.", calculations=[("ratio", [("139,156", 1), ("1,000", 1)])]),
-        PASSAGES,
-        QUESTION,
-    )
-    assert r.answer == "That is $139.16 billion."
-
-
-def test_unit_conversion_by_multiplying():
-    r = respond(
-        reply("That is ${c1} billion.", calculations=[("product", [("139,156", 1), ("0.001", 1)])]),
+        reply("That is ${c1} billion.", calculations=[(operation, [("139,156", 1), (factor, 1)])]),
         PASSAGES,
         QUESTION,
     )

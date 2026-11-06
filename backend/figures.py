@@ -20,7 +20,7 @@ LABELS = re.compile(r"\b(?:10-K|10-Q|8-K|Q[1-4]|[1-4]Q|H[12])\b", re.IGNORECASE)
 SHORT_FISCAL_YEAR = re.compile(r"\b(?:FY|Q[1-4]|[1-4]Q)\s?'?(\d{2})\b", re.IGNORECASE)
 NUMBER = re.compile(r"\d+(?:,\d{3})*(?:\.\d+)?")
 # Models often write Unicode hyphens and minus signs ("10\u2011K", "\u22123.2"); read them as "-".
-DASHES = str.maketrans({c: "-" for c in "\u2010\u2011\u2012\u2013\u2014\u2015\u2212"})
+DASHES = str.maketrans(dict.fromkeys("\u2010\u2011\u2012\u2013\u2014\u2015\u2212", "-"))
 
 
 def values_in(text: str) -> set[Decimal]:
@@ -42,39 +42,25 @@ def parse(value: str) -> Decimal | None:
 
 def calculate(operation: Operation, inputs: list[Decimal]) -> Decimal | None:
     """Do one calculation, or return None if its inputs don't fit it."""
-    if operation in ("sum", "average", "product"):
-        if len(inputs) < 2:
-            return None
-    elif len(inputs) != (3 if operation == "cagr" else 2):
-        return None
-
-    match operation:
-        case "sum":
+    match operation, inputs:
+        case "sum", [_, _, *_]:
             return sum(inputs)
-        case "average":
+        case "average", [_, _, *_]:
             return sum(inputs) / len(inputs)
-        case "product":
+        case "product", [_, _, *_]:
             return math.prod(inputs)
-        case "difference":
-            a, b = inputs
+        case "difference", [a, b]:
             return a - b
-        case "ratio" | "percentage":
-            part, whole = inputs
-            if not whole:
-                return None
-            return part / whole * (100 if operation == "percentage" else 1)
-        case "percent_change":
-            old, new = inputs
-            if not old:
-                return None
+        case "ratio", [part, whole] if whole:
+            return part / whole
+        case "percentage", [part, whole] if whole:
+            return part / whole * 100
+        case "percent_change", [old, new] if old:
             if (old < 0) == (new < 0):
                 # Same sign: change in size, so capex going (1,373) -> (1,577) is growth.
                 old, new = abs(old), abs(new)
             return (new - old) / abs(old) * 100
-        case "cagr":
-            start, end, years = inputs
-            if start <= 0 or end <= 0 or years <= 0:
-                return None
+        case "cagr", [start, end, years] if start > 0 and end > 0 and years > 0:
             return ((end / start) ** (1 / years) - 1) * 100
     return None
 
@@ -85,9 +71,11 @@ def format_result(result: Decimal, percent: bool, decimals: int, exact: bool = F
     Whole results have no decimals. Unless `exact` (the question asked for that rounding),
     small results keep at least 3 significant digits (0.103, not 0.10).
     """
-    whole = result == result.to_integral_value()
-    places = 0 if whole else decimals
-    while not exact and not whole and abs(result) < Decimal(10) ** (2 - places):
-        places += 1
+    if result == result.to_integral_value():
+        places = 0
+    else:
+        places = decimals
+        while not exact and abs(result) < Decimal(10) ** (2 - places):
+            places += 1
     text = f"{result:,.{places}f}"
     return f"{text}%" if percent else text
