@@ -21,20 +21,20 @@ The 150 [FinanceBench](https://github.com/patronus-ai/financebench) open-source 
 | Metric | Result |
 | --- | --- |
 | Found the right page | 94/150 (63%) |
-| Answered correctly (numeric answers within 1%) | 42/54 (78%) |
+| Answered correctly (numeric answers within 1%) | 43/54 (80%) |
 | Refused correctly | 15/15 (100%) |
-| Blocked a number | 4 |
+| Blocked a number | 2 |
 
 Only the 54 short numeric answers are graded; the 96 written ones need judgement.
 
 | Number check | Off | On |
 | --- | --- | --- |
-| Questions answered | 100 | 97 |
-| Numeric answers correct | 42 | 42 |
-| Numeric answers wrong | 5 | 4 |
+| Questions answered | 100 | 98 |
+| Numeric answers correct | 43 | 43 |
+| Numeric answers wrong | 4 | 4 |
 
 The model rarely invents a figure outright, so the check mostly guarantees that every number
-shown is traceable. None of the four answers it blocked was a correct numeric answer.
+shown is traceable. Of the two answers it blocked, one was correct (Boeing, below).
 
 ## How it works
 
@@ -91,13 +91,15 @@ uploads, accounts, or filings outside FinanceBench.
 
 ## Three real wrong answers
 
-1. **PepsiCo's credit facility increase: $750 million (expected $400 million).** The 8-K says
-   a new $4.2 billion facility *may later be increased* to $4.95 billion. The model subtracted
-   the two, mistaking an optional upsize for the actual change, on the wrong facility.
+1. **Netflix's FY2015 EBITDA margin: 56.83% (expected 5.4%).** For depreciation and
+   amortization the model added the amortization of streaming content (3,405,382) to the
+   real D&A line. Every number was on the cash flow statement, so the number check let it
+   through: it can't tell a real number from the right one.
 2. **Pfizer's remaining Upjohn spin-off cost: $700 million (expected $77.78 million).**
    Retrieval returned the 2021 10-K instead of the 2023 10-Q, and the model quoted the total
-   cost rather than what was left to pay.
-3. **Walmart's 3-year average EBITDA margin: 6.02% (expected 6.2%), blocked.** The model got
-   each year's margin right, then averaged the wrong results and gave one year's margin. It
-   had copied its own sums (like 31,555) as if they were on a page, so the number check
-   refused the answer.
+   cost rather than what was left to pay. The 10-Q says about 90% of $700 million has been
+   spent, which leaves $70 million, so the expected answer looks wrong too.
+3. **Boeing's segments over 20% of revenue: correct, but blocked.** The model computed each
+   segment's share right (38.83%, 34.77%, 26.44%), then wrote "each exceeding 20%". The 20
+   came from the question, and figures from the question aren't evidence, so the whole
+   answer was refused.

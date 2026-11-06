@@ -68,7 +68,8 @@ two tables use different units, convert one first. If the question asks for a di
 unit than the excerpt's, give the figure with the excerpt's unit (e.g. "$45,210 \
 thousand") or convert it with a calculation.
 - Write {c1} in the answer where the first calculation's result goes, {c2} for the \
-second, and so on. Don't write "%" after a placeholder: results come with their units.
+second, and so on. Every result must be used, in the answer or in a later calculation. \
+Percentages come with "%"; write any other unit yourself (e.g. "${c1} million").
 - Put the number of every excerpt you relied on in cited_excerpts.
 - List every number that appears in your answer in numbers, with the excerpt it came \
 from. Years and fiscal periods count. Do not list the {c1} placeholders.

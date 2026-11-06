@@ -55,6 +55,49 @@ def test_chained_calculation_with_a_number_from_the_question():
     assert r.answer == "DPO was 95.49 days."
 
 
+def test_copied_result_counts_as_that_result():
+    r = respond(
+        reply(
+            "The average was {c3}.",
+            calculations=[
+                ("sum", [("139,156", 1), ("232,887", 1)]),
+                ("percentage", [("372,043", 0), ("232,887", 1)]),
+                ("average", [("{c2}", 0), ("139,156", 1)]),
+            ],
+        ),
+        PASSAGES,
+        QUESTION,
+    )
+    assert r.answered and r.calculations[1].inputs == ["{c1}", "232,887"]
+
+
+def test_unused_result_is_refused():
+    r = respond(
+        reply(
+            "Gross margin was {c1}.",
+            calculations=[
+                ("percentage", [("139,156", 1), ("232,887", 1)]),
+                ("sum", [("139,156", 1), ("232,887", 1)]),
+            ],
+        ),
+        PASSAGES,
+        QUESTION,
+    )
+    assert r.refusal == "malformed_reply"
+
+
+def test_result_written_out_in_the_answer_counts_as_used():
+    r = respond(
+        reply(
+            "Together they were 372,043.",
+            calculations=[("sum", [("139,156", 1), ("232,887", 1)])],
+        ),
+        PASSAGES,
+        QUESTION,
+    )
+    assert r.answered
+
+
 def test_ratio_never_shown_as_a_percentage():
     r = respond(
         reply("The ratio was {c1}%.", calculations=[("ratio", [("139,156", 1), ("232,887", 1)])]),

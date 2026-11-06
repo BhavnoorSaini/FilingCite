@@ -63,21 +63,32 @@ def refuse(reason: str) -> AskResponse:
     return AskResponse(answered=False, refusal=reason, message=message)
 
 
+def earlier_result(value: str, shown: list[CalculationResult]) -> int | None:
+    """Which earlier result an input means: "{c1}", or a copy of that result ("31,555")."""
+    placeholder = PLACEHOLDER.fullmatch(value.strip())
+    if placeholder:
+        return int(placeholder[1])
+    return next((i for i, c in enumerate(shown, 1) if parse(c.result) == parse(value)), None)
+
+
 def run_calculations(calculations: list[Calculation]) -> list[CalculationResult] | None:
     """Do the model's calculations in order, or return None if one can't be done.
 
-    "{c1}" as an input means the exact result of the first calculation.
+    An input that refers to an earlier result uses its exact value, not the rounded one shown.
     """
     results: list[tuple[Decimal, bool]] = []  # (value, is a percentage)
     shown: list[CalculationResult] = []
     for calc in calculations:
         inputs: list[tuple[Decimal, bool]] = []
+        written: list[str] = []
         for item in calc.inputs:
-            earlier = PLACEHOLDER.fullmatch(item.value.strip())
-            if not earlier:
+            n = earlier_result(item.value, shown)
+            if n is None:
                 inputs.append((parse(item.value), False))
-            elif 1 <= int(earlier[1]) <= len(results):
-                inputs.append(results[int(earlier[1]) - 1])
+                written.append(item.value)
+            elif 1 <= n <= len(results):
+                inputs.append(results[n - 1])
+                written.append(f"{{c{n}}}")
             else:
                 return None
         result = calculate(calc.operation, [value for value, _ in inputs])
@@ -91,7 +102,7 @@ def run_calculations(calculations: list[Calculation]) -> list[CalculationResult]
         shown.append(
             CalculationResult(
                 operation=calc.operation,
-                inputs=[item.value for item in calc.inputs],
+                inputs=written,
                 result=format_result(result, percent, int(os.environ["CALC_DECIMALS"])),
             )
         )
@@ -133,24 +144,32 @@ def respond(
     copied = [n for n in used if not PLACEHOLDER.fullmatch(n.value.strip())]
     if any(parse(n.value) is None for n in copied):
         return refuse("malformed_reply")
-    if verify_numbers and any(
-        abs(parse(n.value)) not in on_page[n.excerpt] | UNIT_FACTORS for n in copied
-    ):
-        return refuse("unverified_number")
 
     calculations = run_calculations(reply.calculations)
     if calculations is None:
         return refuse("malformed_reply")
+    # A result nothing uses means the model lost track of which result is which. The answer
+    # can use a result through its placeholder or by writing it out.
+    in_answer = values_in(PLACEHOLDER.sub(" ", reply.answer))
+    used_results = {int(n) for n in PLACEHOLDER.findall(reply.answer)}
+    used_results |= {int(n) for c in calculations for i in c.inputs for n in PLACEHOLDER.findall(i)}
+    used_results |= {i for i, c in enumerate(calculations, 1) if values_in(c.result) <= in_answer}
+    if used_results != set(range(1, len(calculations) + 1)):
+        return refuse("malformed_reply")
+
+    # Copied numbers must be on their page, unless Python worked them out.
+    results = set().union(*(values_in(c.result) for c in calculations))
+    if verify_numbers and any(
+        abs(parse(n.value)) not in on_page[n.excerpt] | UNIT_FACTORS | results for n in copied
+    ):
+        return refuse("unverified_number")
 
     # The answer text may show numbers from cited pages, calculation results and the
     # question's years, but not other figures from the question: a leading question's
     # number isn't evidence.
-    allowed = set().union(*(on_page[i] for i in cited), years_in(question))
-    allowed |= set().union(*(values_in(c.result) for c in calculations))
-    if verify_numbers and not values_in(PLACEHOLDER.sub(" ", reply.answer)) <= allowed:
+    allowed = set().union(*(on_page[i] for i in cited), years_in(question)) | results
+    if verify_numbers and not in_answer <= allowed:
         return refuse("unverified_number")
-    if any(not 1 <= int(i) <= len(calculations) for i in PLACEHOLDER.findall(reply.answer)):
-        return refuse("malformed_reply")
 
     answer = PLACEHOLDER_IN_ANSWER.sub(lambda m: calculations[int(m[1]) - 1].result, reply.answer)
     citations = [Citation(number=i, **asdict(passages[n - 1])) for i, n in enumerate(cited, 1)]
