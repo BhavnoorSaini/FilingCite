@@ -1,8 +1,19 @@
+:root {
+  --text: #1c1c1a;
+  --muted: #62625d;
+  --border: #dcdcd5;
+  --accent: #1f5c4a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   background: #f7f7f5;
-  color: #1c1c1a;
-  font-family: system-ui, sans-serif;
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   line-height: 1.5;
 }
 
@@ -12,8 +23,38 @@ main {
   padding: 48px 16px;
 }
 
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 2rem;
+  letter-spacing: -0.02em;
+}
+
+.github {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 0.9rem;
+  color: var(--text);
+  text-decoration: none;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.github:hover {
+  border-color: var(--muted);
+}
+
 .muted {
-  color: #62625d;
+  color: var(--muted);
 }
 
 form {
@@ -22,38 +63,29 @@ form {
   margin-top: 24px;
 }
 
-.examples {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 12px 0 24px;
-}
-
-.examples button {
-  padding: 4px 12px;
-  font-size: 0.9rem;
-  font-weight: normal;
-  color: inherit;
-  background: #fff;
-  border: 1px solid #d6d6cf;
-  border-radius: 999px;
-}
-
 input {
   flex: 1;
   min-width: 0;
-  padding: 10px;
+  padding: 12px;
   font: inherit;
-  border: 1px solid #d6d6cf;
+  background: #fff;
+  border: 1px solid var(--border);
   border-radius: 8px;
 }
 
+input:focus,
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 button {
-  padding: 10px 20px;
+  padding: 12px 20px;
   font: inherit;
   font-weight: 600;
   color: #fff;
-  background: #1f5c4a;
+  background: var(--accent);
   border: none;
   border-radius: 8px;
   cursor: pointer;
@@ -61,19 +93,49 @@ button {
 
 button:disabled {
   opacity: 0.6;
+  cursor: default;
+}
+
+.label {
+  margin: 20px 0 8px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.examples button {
+  padding: 6px 12px;
+  font-size: 0.875rem;
+  font-weight: normal;
+  text-align: left;
+  color: inherit;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+
+.examples button:hover:not(:disabled) {
+  border-color: var(--accent);
 }
 
 .card {
   margin: 0;
   padding: 20px;
+  overflow-wrap: anywhere;
   background: #fff;
-  border: 1px solid #e2e2dc;
+  border: 1px solid var(--border);
   border-radius: 12px;
 }
 
 .refusal {
   background: #fdf6e7;
-  border-color: #8a5a00;
+  border-color: #e3c58a;
 }
 
 .answer {
@@ -84,8 +146,9 @@ button:disabled {
 h3 {
   margin: 20px 0 4px;
   font-size: 0.8rem;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #62625d;
+  color: var(--muted);
 }
 
 ol {
@@ -94,6 +157,29 @@ ol {
   list-style: none;
 }
 
+li + li {
+  margin-top: 4px;
+}
+
 a {
-  color: #1f5c4a;
+  color: var(--accent);
+}
+
+footer {
+  margin-top: 32px;
+  font-size: 0.85rem;
+}
+
+@media (max-width: 520px) {
+  main {
+    padding: 28px 16px;
+  }
+
+  h1 {
+    font-size: 1.6rem;
+  }
+
+  form {
+    flex-direction: column;
+  }
 }
