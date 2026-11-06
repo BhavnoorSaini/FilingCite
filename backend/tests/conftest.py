@@ -40,8 +40,7 @@ PASSAGES = [INCOME, BALANCE]
 def reply(
     answer: str = "",
     cited: list[int] | None = None,
-    numbers: list[tuple[str, int]] = (),
-    calculations: list[tuple[str, list[tuple[str, int]]]] = (),
+    calculations: list[tuple[str, list[str]]] = (),
     status: str = "answered",
     round_to: int | None = None,
 ) -> str:
@@ -51,11 +50,7 @@ def reply(
             "status": status,
             "answer": answer,
             "cited_excerpts": [1] if cited is None else cited,
-            "numbers": [{"value": v, "excerpt": e} for v, e in numbers],
-            "calculations": [
-                {"operation": op, "inputs": [{"value": v, "excerpt": e} for v, e in inputs]}
-                for op, inputs in calculations
-            ],
+            "calculations": [{"operation": op, "inputs": inputs} for op, inputs in calculations],
             "round_to": round_to,
         }
     )

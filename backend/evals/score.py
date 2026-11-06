@@ -7,7 +7,6 @@ Usage (from backend/):  uv run --env-file ../.env python -m evals.score --name f
   number within 1% of it, ignoring sign and scale (ratio vs percent, thousands vs millions).
   Written answers need a person to judge, so they aren't graded.
 - Refused correctly: a should-refuse question wasn't answered.
-- Blocked a number: the number check refused an answer the model wrote.
 """
 
 import argparse
@@ -22,10 +21,10 @@ def numbers(text: str) -> list[Decimal]:
     return [Decimal(n.replace(",", "")) for n in NUMBER.findall(text)]
 
 
-def grade(r: dict, mode: str, threshold: Decimal) -> dict:
-    """What the user would see at this threshold, with the number check on or off, graded."""
+def grade(r: dict, threshold: Decimal) -> dict:
+    """What the user would see at this threshold, graded."""
     weak = Decimal(str(r["top_similarity"])) < threshold
-    shown = {"answered": False, "refusal": "weak_match"} if weak else r[mode]
+    shown = {"answered": False} if weak else r["response"]
     expected = r["expected"]
     target = numbers(expected)[:1] if expected and len(expected.split()) <= 6 else []
     found = numbers(shown["answer"]) if shown["answered"] else []
@@ -33,7 +32,6 @@ def grade(r: dict, mode: str, threshold: Decimal) -> dict:
     return {
         "should_refuse": expected is None,
         "answered": shown["answered"],
-        "blocked": shown["refusal"] == "unverified_number",
         "hit": any(e in r["retrieved"] for e in r["evidence"]),
         "numeric": bool(target),
         "correct": any(
@@ -45,8 +43,8 @@ def grade(r: dict, mode: str, threshold: Decimal) -> dict:
     }
 
 
-def summarize(records: list[dict], mode: str, threshold: Decimal) -> dict:
-    graded = [grade(r, mode, threshold) for r in records]
+def summarize(records: list[dict], threshold: Decimal) -> dict:
+    graded = [grade(r, threshold) for r in records]
     financebench = [g for g in graded if not g["should_refuse"]]
     numeric = [g for g in financebench if g["numeric"]]
     should_refuse = [g for g in graded if g["should_refuse"]]
@@ -59,7 +57,6 @@ def summarize(records: list[dict], mode: str, threshold: Decimal) -> dict:
         "wrong": sum(g["answered"] and not g["correct"] for g in numeric),
         "should_refuse": len(should_refuse),
         "refused": sum(not g["answered"] for g in should_refuse),
-        "blocked": sum(g["blocked"] for g in graded),
     }
 
 
@@ -68,29 +65,22 @@ def pct(part: int, whole: int) -> str:
 
 
 def scorecard(records: list[dict], threshold: Decimal, name: str) -> str:
-    on, off = summarize(records, "on", threshold), summarize(records, "off", threshold)
+    s = summarize(records, threshold)
     lines = [
         f"# FilingCite scorecard: {name}",
         "",
         (
-            f"{on['questions']} FinanceBench + {on['should_refuse']} should-refuse questions, "
+            f"{s['questions']} FinanceBench + {s['should_refuse']} should-refuse questions, "
             f"MIN_SIMILARITY {threshold}, {os.environ['LLM_MODEL']}."
         ),
         "",
         "| Metric | Result |",
         "| --- | --- |",
-        f"| Found the right page | {pct(on['hit'], on['questions'])} |",
-        f"| Answered correctly (numeric, within 1%) | {pct(on['correct'], on['numeric'])} |",
-        f"| Refused correctly | {pct(on['refused'], on['should_refuse'])} |",
-        f"| Blocked a number | {on['blocked']} |",
-        "",
-        "## Number check off vs on",
-        "",
-        "| | Off | On |",
-        "| --- | --- | --- |",
-        f"| FinanceBench answered | {off['answered']} | {on['answered']} |",
-        f"| Numeric answers correct | {off['correct']} | {on['correct']} |",
-        f"| Numeric answers wrong | {off['wrong']} | {on['wrong']} |",
+        f"| Found the right page | {pct(s['hit'], s['questions'])} |",
+        f"| FinanceBench questions answered | {s['answered']}/{s['questions']} |",
+        f"| Answered correctly (numeric, within 1%) | {pct(s['correct'], s['numeric'])} |",
+        f"| Numeric answers wrong | {s['wrong']} |",
+        f"| Refused correctly | {pct(s['refused'], s['should_refuse'])} |",
         "",
         "## Refusal threshold sweep",
         "",
@@ -98,9 +88,9 @@ def scorecard(records: list[dict], threshold: Decimal, name: str) -> str:
         "| --- | --- | --- | --- |",
     ]
     for t in (Decimal(t) / 100 for t in range(60, 81, 2)):
-        s = summarize(records, "on", t)
-        refused = f"{s['refused']}/{s['should_refuse']}"
-        lines.append(f"| {t} | {s['answered']} | {s['correct']} | {refused} |")
+        at = summarize(records, t)
+        refused = f"{at['refused']}/{at['should_refuse']}"
+        lines.append(f"| {t} | {at['answered']} | {at['correct']} | {refused} |")
     return "\n".join(lines) + "\n"
 
 

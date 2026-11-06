@@ -9,15 +9,6 @@ def test_values_ignore_formatting_and_sign():
     assert values_in("$ 1,577 and (1,373) and 2.5%") == {D(1577), D(1373), D("2.5")}
 
 
-def test_labels_are_not_figures():
-    assert values_in("Per the 10-K, Q2 and H1 sales were 5") == {D(5)}
-    assert values_in("Per the 10‑K") == set()  # a non-breaking hyphen, as models write it
-
-
-def test_short_fiscal_years_read_as_full_years():
-    assert values_in("FY22 and 2Q23") == {D(2022), D(2023)}
-
-
 @pytest.mark.parametrize(
     "text, value",
     [("$1,577", D(1577)), ("(1,577)", D(-1577)), ("−3.2%", D("-3.2")), ("n/a", None)],

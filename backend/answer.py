@@ -1,6 +1,6 @@
-"""Turn a question into a checked, cited answer, or refuse.
+"""Turn a question into a cited answer, or refuse.
 
-Python makes every check and does all the math; the model only drafts.
+The model drafts; Python checks the reply and does all the math.
 """
 
 import os
@@ -13,21 +13,18 @@ from pydantic import BaseModel, ValidationError
 
 from figures import Operation, calculate, format_result, parse, values_in
 from llm import Calculation, Model, Reply, build_prompt
-from retrieval import Passage, search, years_in
+from retrieval import Passage, search
 
 REFUSAL_MESSAGES = {
     "weak_match": "Nothing in the loaded filings closely matches this question.",
     "not_in_filings": "The filings I found don't contain the answer.",
     "malformed_reply": "The answer couldn't be checked, so it isn't shown.",
     "invalid_citation": "The draft answer cited text it wasn't given, so it isn't shown.",
-    "unverified_number": "The draft used a number I couldn't trace to the cited pages.",
 }
 
 PLACEHOLDER = re.compile(r"\{c(\d+)\}")
 # Drops any "%" the model put after a placeholder: Python decides what's a percentage.
 PLACEHOLDER_IN_ANSWER = re.compile(r"\{c(\d+)\}(?:\s?%|\s+percent\b)?")
-# Allowed as inputs for unit conversions: they scale a figure but can't invent digits.
-UNIT_FACTORS = {Decimal(f) for f in (100, 1000, 1000000, "0.01", "0.001", "0.000001")}
 
 
 class Citation(BaseModel):
@@ -81,11 +78,14 @@ def run_calculations(
     for calc in calculations:
         inputs: list[tuple[Decimal, bool]] = []
         written: list[str] = []
-        for item in calc.inputs:
-            n = earlier_result(item.value, shown)
+        for value in calc.inputs:
+            n = earlier_result(value, shown)
             if n is None:
-                inputs.append((parse(item.value), False))
-                written.append(item.value)
+                number = parse(value)
+                if number is None:
+                    return None
+                inputs.append((number, False))
+                written.append(value)
             elif 1 <= n <= len(results):
                 inputs.append(results[n - 1])
                 written.append(f"{{c{n}}}")
@@ -121,58 +121,23 @@ def all_results_used(answer: str, calculations: list[CalculationResult]) -> bool
     return used == set(range(1, len(calculations) + 1))
 
 
-def respond(
-    raw: str, passages: list[Passage], question: str, verify_numbers: bool = True
-) -> AskResponse:
-    """Check the model's reply and build what the user sees.
-
-    verify_numbers=False skips the number check, so the eval can compare it off and on.
-    """
+def respond(raw: str, passages: list[Passage]) -> AskResponse:
+    """Check the model's reply and build what the user sees."""
     try:
         reply = Reply.model_validate_json(raw)
     except ValidationError:
         return refuse("malformed_reply")
     if reply.status == "not_in_excerpts":
         return refuse("not_in_filings")
-    if not reply.answer.strip() or not reply.cited_excerpts:
+    cited = list(dict.fromkeys(reply.cited_excerpts))  # keep order, drop repeats
+    if not reply.answer.strip() or not cited:
         return refuse("malformed_reply")
-
-    # The numbers on each excerpt, including its label ("3M", "2018"). Excerpt 0 is the question.
-    on_page = {
-        i: values_in(f"{p.company} {p.content}") | {p.doc_period} for i, p in enumerate(passages, 1)
-    }
-    on_page[0] = values_in(question)
-
-    used = reply.numbers + [n for calc in reply.calculations for n in calc.inputs]
-    copied = [n for n in used if not PLACEHOLDER.fullmatch(n.value.strip())]
-    if any(parse(n.value) is None for n in copied):
-        return refuse("malformed_reply")
+    if not set(cited) <= set(range(1, len(passages) + 1)):
+        return refuse("invalid_citation")
 
     calculations = run_calculations(reply.calculations, reply.round_to)
     if calculations is None or not all_results_used(reply.answer, calculations):
         return refuse("malformed_reply")
-
-    # A number from a page must be on a cited excerpt. Unit factors, the question's numbers
-    # and copies of results don't come from a page.
-    results = set().union(*(values_in(c.result) for c in calculations))
-    traceable = on_page[0] | UNIT_FACTORS | results
-    cited = list(dict.fromkeys(reply.cited_excerpts))  # keep order, drop repeats
-    from_pages = [n for n in copied if abs(parse(n.value)) not in traceable]
-    if not set(cited) <= set(range(1, len(passages) + 1)) or any(
-        n.excerpt not in cited for n in from_pages
-    ):
-        return refuse("invalid_citation")
-
-    if verify_numbers and any(abs(parse(n.value)) not in on_page[n.excerpt] for n in from_pages):
-        return refuse("unverified_number")
-
-    # The answer may repeat cited numbers, the working and the question's years, but not
-    # other numbers from the question: those aren't evidence.
-    inputs = {abs(parse(i)) for c in calculations for i in c.inputs if not PLACEHOLDER.match(i)}
-    allowed = set().union(*(on_page[i] for i in cited), years_in(question), inputs) | results
-    in_answer = values_in(PLACEHOLDER.sub(" ", reply.answer))
-    if verify_numbers and not in_answer <= allowed:
-        return refuse("unverified_number")
 
     answer = PLACEHOLDER_IN_ANSWER.sub(lambda m: calculations[int(m[1]) - 1].result, reply.answer)
     citations = [Citation(number=i, **asdict(passages[n - 1])) for i, n in enumerate(cited, 1)]
@@ -184,4 +149,4 @@ def answer_question(conn: psycopg.Connection, question: str, model: Model) -> As
     # Refuse if even the best match is weak.
     if not passages or max(p.similarity for p in passages) < float(os.environ["MIN_SIMILARITY"]):
         return refuse("weak_match")
-    return respond(model(build_prompt(question, passages)), passages, question)
+    return respond(model(build_prompt(question, passages)), passages)

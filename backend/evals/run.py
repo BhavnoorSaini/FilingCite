@@ -2,9 +2,8 @@
 
 Usage (from backend/):  uv run --env-file ../.env python -m evals.run --name full
 
-Re-running with the same --name picks up where it stopped. Each reply is checked with the
-number check on and off, and the model is called even for weak matches so evals.score can
-try other thresholds.
+Re-running with the same --name picks up where it stopped. The model is called even for weak
+matches, so evals.score can try other thresholds.
 """
 
 import argparse
@@ -64,13 +63,13 @@ def main() -> None:
                 **q,
                 "retrieved": [[p.doc_name, p.page] for p in passages],
                 "top_similarity": max(p.similarity for p in passages),
-                "on": respond(raw, passages, q["question"]).model_dump(),
-                "off": respond(raw, passages, q["question"], verify_numbers=False).model_dump(),
+                "response": respond(raw, passages).model_dump(),
             }
             out.write(json.dumps(result) + "\n")
             out.flush()
             print(
-                f"[{i}/{len(todo)}] {q['id']}: {result['on']['refusal'] or 'answered'}", flush=True
+                f"[{i}/{len(todo)}] {q['id']}: {result['response']['refusal'] or 'answered'}",
+                flush=True,
             )
 
 

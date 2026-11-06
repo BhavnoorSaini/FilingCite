@@ -16,7 +16,6 @@ from pathlib import Path
 import psycopg
 
 from embedding import embed_query
-from figures import SHORT_FISCAL_YEAR
 
 
 @dataclass
@@ -100,6 +99,8 @@ STATEMENTS = [
 TICKERS = json.loads((Path(__file__).parent / "tickers.json").read_text())
 
 YEAR = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")  # also inside "FY2018"
+# "FY22", "2Q23" and "Q2'23" are read as full years.
+SHORT_FISCAL_YEAR = re.compile(r"\b(?:FY|Q[1-4]|[1-4]Q)\s?'?(\d{2})\b", re.IGNORECASE)
 
 
 def normalize(text: str) -> str:

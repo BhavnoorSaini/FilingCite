@@ -21,21 +21,15 @@ class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")  # required for strict structured outputs
 
 
-class UsedNumber(Strict):
-    value: str  # as written in the excerpt, e.g. "(1,577)"
-    excerpt: int  # the excerpt it's from; 0 is the question
-
-
 class Calculation(Strict):
     operation: Operation
-    inputs: list[UsedNumber]
+    inputs: list[str]  # numbers as written, e.g. "(1,577)", or earlier results like "{c1}"
 
 
 class Reply(Strict):
     status: Literal["answered", "not_in_excerpts"]
     answer: str  # may contain {c1}, {c2}... where calculation results go
     cited_excerpts: list[int]
-    numbers: list[UsedNumber]
     calculations: list[Calculation]
     round_to: int | None  # decimal places the question asks for
 
@@ -62,9 +56,8 @@ margin or "as a %" figure
   average: two or more inputs (e.g. average total assets over two years); never divide \
 a sum by 2 instead
   product: two or more inputs multiplied (e.g. 365 times a ratio)
-- Calculation inputs may also be, with excerpt 0: an earlier result such as {c1}; a \
-number the question itself gives (e.g. 365 in a formula it defines); or 1,000 or \
-1,000,000 to convert units.
+- Calculation inputs may also be an earlier result such as {c1}, a number the question \
+itself gives (e.g. 365 in a formula it defines), or 1,000 or 1,000,000 to convert units.
 - All inputs to one calculation must be in the same unit (e.g. all in $ millions). If \
 two tables use different units, convert one first. If the question asks for a different \
 unit than the excerpt's, give the figure with the excerpt's unit (e.g. "$45,210 \
@@ -75,8 +68,6 @@ place"), or null if it doesn't ask. Python does the rounding.
 second, and so on. Every result must be used, in the answer or in a later calculation. \
 Percentages come with "%"; write any other unit yourself (e.g. "${c1} million").
 - Put the number of every excerpt you relied on in cited_excerpts.
-- List every number that appears in your answer in numbers, with the excerpt it came \
-from. Years and fiscal periods count. Do not list the {c1} placeholders.
 - Keep the answer short: one to three sentences, with units (e.g. "$ millions")."""
 
 
@@ -89,7 +80,7 @@ def build_prompt(question: str, passages: list[Passage]) -> str:
 
 
 def chat_model() -> Model:
-    """Call an OpenAI-compatible API (Groq or OpenRouter) with a strict reply schema."""
+    """Call Groq with a strict reply schema."""
     client = OpenAI(base_url=os.environ["LLM_BASE_URL"], api_key=os.environ["LLM_API_KEY"])
     schema = {"name": "reply", "strict": True, "schema": Reply.model_json_schema()}
 

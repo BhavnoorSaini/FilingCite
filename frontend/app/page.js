@@ -50,8 +50,8 @@ export default function Home() {
     <main>
       <h1>FilingCite</h1>
       <p className="muted">
-        Answers about public companies&apos; SEC filings. Every number is traced to a cited page,
-        or FilingCite says it doesn&apos;t know.
+        Answers about public companies&apos; SEC filings, citing the exact page. If the filings
+        don&apos;t support an answer, FilingCite says it doesn&apos;t know.
       </p>
 
       <form
